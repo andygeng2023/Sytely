@@ -6,7 +6,8 @@
   "types": "./src/index.tsx",
   "dependencies": {
     "@sytely/types": "workspace:*",
-    "react": "latest"
+    "react": "latest",
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",

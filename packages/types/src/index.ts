@@ -5,24 +5,29 @@ export type ComponentType =
   | "image"
   | "button";
 
+export type NodeStyles = Record<string, unknown>;
+
 export interface ComponentNode {
   id: string;
   type: ComponentType;
   props: Record<string, unknown>;
-  styles: Record<string, unknown>;
-  children: ComponentNode[];
+  styles?: NodeStyles;
+  children?: ComponentNode[];
+}
+
+export interface PageMargins {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
 }
 
 export interface SitePage {
   id: string;
   name: string;
   slug: string;
-  margins: {
-    top: number;
-    right: number;
-    bottom: number;
-    left: number;
-  };
+  margins: PageMargins;
+  styles?: NodeStyles;
   components: ComponentNode[];
 }
 

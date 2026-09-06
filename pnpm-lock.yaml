@@ -173,6 +173,9 @@ importers:
       react:
         specifier: latest
         version: 19.2.8
+      react-dom:
+        specifier: latest
+        version: 19.2.8(react@19.2.8)
     devDependencies:
       '@types/react':
         specifier: latest

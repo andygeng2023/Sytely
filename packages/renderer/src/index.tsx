@@ -1,97 +1,37 @@
 import {
-  createElement,
   Fragment,
+  createElement,
   type CSSProperties,
   type ReactNode
 } from "react";
-
 import type { ComponentNode } from "@sytely/types";
 
-function getStyleValue(
-  styles: Record<string, unknown>,
-  key: string
-): unknown {
-  return styles[key];
+export interface RenderOptions {
+  children?: ReactNode;
+  renderChildren?: boolean;
 }
 
-function getStyles(node: ComponentNode): CSSProperties {
-  const styles = node.styles ?? {};
+function styleObject(input?: Record<string, unknown>): CSSProperties {
+  const result: Record<string, unknown> = {};
 
-  return {
-    width: getStyleValue(styles, "width") as CSSProperties["width"],
-    height: getStyleValue(styles, "height") as CSSProperties["height"],
-    minHeight: getStyleValue(
-      styles,
-      "minHeight"
-    ) as CSSProperties["minHeight"],
-    maxWidth: getStyleValue(
-      styles,
-      "maxWidth"
-    ) as CSSProperties["maxWidth"],
-    background: getStyleValue(
-      styles,
-      "background"
-    ) as CSSProperties["background"],
-    backgroundColor: getStyleValue(
-      styles,
-      "backgroundColor"
-    ) as CSSProperties["backgroundColor"],
-    color: getStyleValue(styles, "color") as CSSProperties["color"],
-    fontFamily: getStyleValue(
-      styles,
-      "fontFamily"
-    ) as CSSProperties["fontFamily"],
-    fontSize: getStyleValue(
-      styles,
-      "fontSize"
-    ) as CSSProperties["fontSize"],
-    fontWeight: getStyleValue(
-      styles,
-      "fontWeight"
-    ) as CSSProperties["fontWeight"],
-    textAlign: getStyleValue(
-      styles,
-      "textAlign"
-    ) as CSSProperties["textAlign"],
-    lineHeight: getStyleValue(
-      styles,
-      "lineHeight"
-    ) as CSSProperties["lineHeight"],
-    padding: getStyleValue(
-      styles,
-      "padding"
-    ) as CSSProperties["padding"],
-    borderRadius: getStyleValue(
-      styles,
-      "borderRadius"
-    ) as CSSProperties["borderRadius"],
-    border: getStyleValue(styles, "border") as CSSProperties["border"],
-    display: getStyleValue(
-      styles,
-      "display"
-    ) as CSSProperties["display"],
-    flexDirection: getStyleValue(
-      styles,
-      "flexDirection"
-    ) as CSSProperties["flexDirection"],
-    gap: getStyleValue(styles, "gap") as CSSProperties["gap"],
-    alignItems: getStyleValue(
-      styles,
-      "alignItems"
-    ) as CSSProperties["alignItems"],
-    justifyContent: getStyleValue(
-      styles,
-      "justifyContent"
-    ) as CSSProperties["justifyContent"],
-    overflow: getStyleValue(
-      styles,
-      "overflow"
-    ) as CSSProperties["overflow"]
-  };
+  for (const [key, value] of Object.entries(input ?? {})) {
+    result[key] = value;
+  }
+
+  return result as CSSProperties;
 }
 
-function renderChildren(children: ComponentNode[]): ReactNode {
-  return children.map((child) =>
+function getString(
+  props: Record<string, unknown>,
+  key: string,
+  fallback = ""
+): string {
+  const value = props[key];
+  return typeof value === "string" ? value : fallback;
+}
+
+function renderChildren(children?: ComponentNode[]): ReactNode {
+  return (children ?? []).map((child) =>
     createElement(
       Fragment,
       { key: child.id },
@@ -100,99 +40,201 @@ function renderChildren(children: ComponentNode[]): ReactNode {
   );
 }
 
-export function renderNode(node: ComponentNode): ReactNode {
-  const styles = getStyles(node);
-  const props = node.props ?? {};
-  const linkTo =
-    typeof props.linkTo === "string" ? props.linkTo : "";
+function wrapLink(
+  node: ComponentNode,
+  content: ReactNode
+): ReactNode {
+  const linkTo = getString(node.props, "linkTo");
 
-  let element: ReactNode;
+  if (!linkTo) {
+    return content;
+  }
+
+  return createElement(
+    "a",
+    {
+      href: linkTo,
+      style: {
+        color: "inherit",
+        textDecoration: "none"
+      }
+    },
+    content
+  );
+}
+
+export function renderNode(
+  node: ComponentNode,
+  options: RenderOptions = {}
+): ReactNode {
+  const props = node.props ?? {};
+  const customStyles = styleObject(node.styles);
+
+  const childContent =
+    options.children !== undefined
+      ? options.children
+      : options.renderChildren === false
+        ? null
+        : renderChildren(node.children);
 
   switch (node.type) {
-    case "section":
-      element = createElement(
-        "section",
-        {
-          style: {
-            width: "100%",
-            boxSizing: "border-box",
-            ...styles
-          }
-        },
-        renderChildren(node.children)
+    case "section": {
+      const style: CSSProperties = {
+        boxSizing: "border-box",
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-start",
+        alignItems: "stretch",
+        gap: 24,
+        paddingTop: 56,
+        paddingRight: 40,
+        paddingBottom: 56,
+        paddingLeft: 40,
+        position: "relative",
+        ...customStyles
+      };
+
+      return wrapLink(
+        node,
+        createElement(
+          "section",
+          {
+            "data-sytely-id": node.id,
+            "data-sytely-type": node.type,
+            style
+          },
+          childContent
+        )
       );
-      break;
+    }
 
     case "heading":
-      element = createElement(
-        "h2",
-        {
-          style: styles
-        },
-        typeof props.text === "string" ? props.text : "Heading"
+      return wrapLink(
+        node,
+        createElement(
+          "h2",
+          {
+            "data-sytely-id": node.id,
+            "data-sytely-type": node.type,
+            style: {
+              margin: 0,
+              ...customStyles
+            }
+          },
+          getString(props, "text", "Heading")
+        )
       );
-      break;
 
     case "text":
-      element = createElement(
-        "p",
-        {
-          style: styles
-        },
-        typeof props.text === "string" ? props.text : "Text"
+      return wrapLink(
+        node,
+        createElement(
+          "p",
+          {
+            "data-sytely-id": node.id,
+            "data-sytely-type": node.type,
+            style: {
+              margin: 0,
+              lineHeight: 1.6,
+              ...customStyles
+            }
+          },
+          getString(props, "text", "Text")
+        )
       );
-      break;
 
-    case "button":
-      element = createElement(
+    case "image": {
+      const src = getString(props, "src");
+      const alt = getString(props, "alt", "Image");
+
+      if (!src) {
+        return wrapLink(
+          node,
+          createElement(
+            "div",
+            {
+              "data-sytely-id": node.id,
+              "data-sytely-type": node.type,
+              style: {
+                width: "100%",
+                height: 220,
+                minWidth: 120,
+                background:
+                  "repeating-linear-gradient(45deg,#f1f1f1 0,#f1f1f1 8px,#e7e7e7 8px,#e7e7e7 16px)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#777",
+                ...customStyles
+              }
+            },
+            "Image"
+          )
+        );
+      }
+
+      return wrapLink(
+        node,
+        createElement("img", {
+          "data-sytely-id": node.id,
+          "data-sytely-type": node.type,
+          src,
+          alt,
+          style: {
+            display: "block",
+            maxWidth: "100%",
+            height: "auto",
+            objectFit: "cover",
+            ...customStyles
+          }
+        })
+      );
+    }
+
+    case "button": {
+      const text = getString(props, "text", "Button");
+      const linkTo = getString(props, "linkTo");
+
+      const buttonStyle: CSSProperties = {
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: "fit-content",
+        padding: "12px 20px",
+        border: "none",
+        borderRadius: 8,
+        cursor: "pointer",
+        textDecoration: "none",
+        ...customStyles
+      };
+
+      if (linkTo) {
+        return createElement(
+          "a",
+          {
+            "data-sytely-id": node.id,
+            "data-sytely-type": node.type,
+            href: linkTo,
+            style: buttonStyle
+          },
+          text
+        );
+      }
+
+      return createElement(
         "button",
         {
+          "data-sytely-id": node.id,
+          "data-sytely-type": node.type,
           type: "button",
-          style: styles
+          style: buttonStyle
         },
-        typeof props.text === "string" ? props.text : "Button"
+        text
       );
-      break;
-
-    case "image":
-      element = createElement("img", {
-        src:
-          typeof props.src === "string" && props.src.length > 0
-            ? props.src
-            : "https://placehold.co/800x500?text=Image",
-        alt: typeof props.alt === "string" ? props.alt : "",
-        style: {
-          display: "block",
-          maxWidth: "100%",
-          objectFit: "cover",
-          ...styles
-        }
-      });
-      break;
+    }
 
     default:
-      element = null;
+      return null;
   }
-
-  /*
-   * Do not wrap arbitrary components in <span>.
-   * A span around a section, heading, or other block element
-   * can create invalid HTML and hydration problems.
-   */
-  if (linkTo && node.type !== "button") {
-    return createElement(
-      "a",
-      {
-        href: linkTo,
-        style: {
-          color: "inherit",
-          textDecoration: "none",
-          display: "contents"
-        }
-      },
-      element
-    );
-  }
-
-  return element;
 }
