@@ -1,0 +1,17 @@
+{
+  "name": "sytely",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "turbo": "latest",
+    "typescript": "latest"
+  },
+  "packageManager": "pnpm@12.3.4"
+}

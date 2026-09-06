@@ -1,0 +1,15 @@
+{
+  "name": "@sytely/renderer",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.tsx",
+  "types": "./src/index.tsx",
+  "dependencies": {
+    "@sytely/types": "workspace:*",
+    "react": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "latest",
+    "@types/react-dom": "latest"
+  }
+}

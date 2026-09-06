@@ -1,0 +1,36 @@
+Sytely/
+│
+├── .github/
+│   └── workflows/
+│
+├── apps/
+│   └── web/
+│       ├── app/
+│       │   ├── globals.css
+│       │   ├── layout.tsx
+│       │   └── page.tsx
+│       ├── public/
+│       ├── next.config.ts
+│       ├── package.json
+│       └── tsconfig.json
+│
+├── packages/
+│   ├── types/
+│   │   ├── src/
+│   │   │   └── index.ts
+│   │   └── package.json
+│   │
+│   ├── components/
+│   │   ├── src/
+│   │   │   └── index.ts
+│   │   └── package.json
+│   │
+│   └── renderer/
+│       ├── src/
+│       │   └── index.ts
+│       └── package.json
+│
+├── .gitignore
+├── package.json
+├── pnpm-workspace.yaml
+└── turbo.json
