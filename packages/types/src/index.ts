@@ -1,39 +1,118 @@
-export type ComponentType =
+export type NodeType =
   | "section"
   | "heading"
-  | "text"
+  | "paragraph"
+  | "button"
   | "image"
-  | "button";
+  | "video"
+  | "gallery"
+  | "divider"
+  | "icon"
+  | "social"
+  | "form"
+  | "menu"
+  | "logo"
+  | "group";
 
-export type NodeStyles = Record<string, unknown>;
+export type Breakpoint = "desktop" | "tablet" | "mobile";
 
-export interface ComponentNode {
-  id: string;
-  type: ComponentType;
-  props: Record<string, unknown>;
-  styles?: NodeStyles;
-  children?: ComponentNode[];
+export type Align = "left" | "center" | "right" | "stretch";
+export type VerticalAlign = "top" | "center" | "bottom";
+
+export interface ResponsiveValue<T> {
+  desktop?: T;
+  tablet?: T;
+  mobile?: T;
 }
 
-export interface PageMargins {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
+export interface NodeStyle {
+  display?: "block" | "flex" | "grid";
+  position?: "relative" | "absolute";
+  width?: string;
+  height?: string;
+  top?: string;
+  left?: string;
+  right?: string;
+  bottom?: string;
+
+  flexDirection?: "row" | "column";
+  justifyContent?: "flex-start" | "center" | "flex-end" | "space-between";
+  alignItems?: "flex-start" | "center" | "flex-end" | "stretch";
+  gap?: string;
+
+  paddingTop?: string;
+  paddingRight?: string;
+  paddingBottom?: string;
+  paddingLeft?: string;
+
+  borderTop?: string;
+
+  marginTop?: string;
+  marginRight?: string;
+  marginBottom?: string;
+  marginLeft?: string;
+
+  background?: string;
+  color?: string;
+  border?: string;
+  borderRadius?: string;
+  boxShadow?: string;
+
+  fontFamily?: string;
+  fontSize?: string;
+  fontWeight?: string;
+  lineHeight?: string;
+  textAlign?: "left" | "center" | "right";
+
+  opacity?: number;
+  overflow?: "visible" | "hidden";
+  objectFit?: "cover" | "contain";
+
+  alignSelf?: Align;
+  verticalAlign?: VerticalAlign;
+
+  zIndex?: number;
+
+  maxWidth?: string;
+  padding?: string;
+}
+
+export interface SiteNode {
+  id: string;
+  type: NodeType;
+  name?: string;
+  content?: string;
+  src?: string;
+  href?: string;
+  alt?: string;
+  style?: NodeStyle;
+  responsive?: Partial<Record<Breakpoint, NodeStyle>>;
+  hidden?: ResponsiveValue<boolean>;
+  children?: SiteNode[];
+}
+
+export interface PageSettings {
+  title: string;
+  slug: string;
+  description?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  noIndex?: boolean;
 }
 
 export interface SitePage {
   id: string;
   name: string;
-  slug: string;
-  margins: PageMargins;
-  styles?: NodeStyles;
-  components: ComponentNode[];
+  settings: PageSettings;
+  components: SiteNode[];
 }
 
 export interface Site {
   id: string;
   name: string;
-  version: number;
   pages: SitePage[];
+  theme: {
+    primaryColor: string;
+    fontFamily: string;
+  };
 }

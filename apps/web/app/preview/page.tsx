@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { SytelyRenderer } from "@sytely/renderer";
 import type { Site } from "@sytely/types";
 
-export default function PublishedHomePage() {
+export default function PreviewPage() {
   const [site, setSite] = useState<Site | null>(null);
 
   useEffect(() => {
@@ -16,28 +16,22 @@ export default function PublishedHomePage() {
   }, []);
 
   if (!site) {
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          fontFamily: "Arial, sans-serif"
-        }}
-      >
-        <div>
-          <h1>Sytely</h1>
-          <p>No published site found.</p>
-          <a href="/editor">Open editor</a>
-        </div>
-      </main>
-    );
+    return <div>Loading preview...</div>;
   }
+
+  const params = new URLSearchParams(
+    window.location.search
+  );
+
+  const requested =
+    params.get("page") || "/";
 
   const page =
     site.pages.find(
-      (item) => item.settings.slug === "/"
-    ) || site.pages[0];
+      (item) =>
+        item.settings.slug === requested
+    ) ||
+    site.pages[0];
 
   return (
     <main

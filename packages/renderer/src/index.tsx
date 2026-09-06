@@ -1,240 +1,302 @@
-import {
-  Fragment,
-  createElement,
-  type CSSProperties,
-  type ReactNode
-} from "react";
-import type { ComponentNode } from "@sytely/types";
+import React, { createElement, Fragment } from "react";
+import type {
+  Breakpoint,
+  NodeStyle,
+  SiteNode
+} from "@sytely/types";
 
-export interface RenderOptions {
-  children?: ReactNode;
-  renderChildren?: boolean;
+export interface RendererProps {
+  nodes: SiteNode[];
+  breakpoint?: Breakpoint;
+  editable?: boolean;
+  selectedIds?: string[];
+  onSelect?: (id: string, event: React.MouseEvent) => void;
 }
 
-function styleObject(input?: Record<string, unknown>): CSSProperties {
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(input ?? {})) {
-    result[key] = value;
-  }
-
-  return result as CSSProperties;
+function mergeStyle(
+  node: SiteNode,
+  breakpoint: Breakpoint
+): NodeStyle {
+  return {
+    ...(node.style ?? {}),
+    ...(node.responsive?.[breakpoint] ?? {})
+  };
 }
 
-function getString(
-  props: Record<string, unknown>,
-  key: string,
-  fallback = ""
-): string {
-  const value = props[key];
-  return typeof value === "string" ? value : fallback;
+function isHidden(node: SiteNode, breakpoint: Breakpoint) {
+  return node.hidden?.[breakpoint] === true;
 }
 
-function renderChildren(children?: ComponentNode[]): ReactNode {
-  return (children ?? []).map((child) =>
-    createElement(
-      Fragment,
-      { key: child.id },
-      renderNode(child)
-    )
-  );
-}
+function LinkWrapper({
+  href,
+  children
+}: {
+  href?: string;
+  children: React.ReactNode;
+}) {
+  if (!href) return <>{children}</>;
 
-function wrapLink(
-  node: ComponentNode,
-  content: ReactNode
-): ReactNode {
-  const linkTo = getString(node.props, "linkTo");
-
-  if (!linkTo) {
-    return content;
-  }
-
-  return createElement(
-    "a",
-    {
-      href: linkTo,
-      style: {
+  return (
+    <a
+      href={href}
+      style={{
         color: "inherit",
         textDecoration: "none"
-      }
-    },
-    content
+      }}
+    >
+      {children}
+    </a>
   );
 }
 
-export function renderNode(
-  node: ComponentNode,
-  options: RenderOptions = {}
-): ReactNode {
-  const props = node.props ?? {};
-  const customStyles = styleObject(node.styles);
+function renderNode(
+  node: SiteNode,
+  breakpoint: Breakpoint,
+  editable: boolean,
+  selectedIds: string[],
+  onSelect?: (id: string, event: React.MouseEvent) => void
+): React.ReactNode {
+  if (isHidden(node, breakpoint)) return null;
 
-  const childContent =
-    options.children !== undefined
-      ? options.children
-      : options.renderChildren === false
-        ? null
-        : renderChildren(node.children);
+  const style = mergeStyle(node, breakpoint);
+  const selected = selectedIds.includes(node.id);
+
+  const commonProps = {
+    style,
+    "data-sytely-node": node.id,
+    onClick: editable
+      ? (event: React.MouseEvent) => {
+          event.stopPropagation();
+          onSelect?.(node.id, event);
+        }
+      : undefined
+  };
+
+  const children = node.children?.map((child) =>
+    renderNode(
+      child,
+      breakpoint,
+      editable,
+      selectedIds,
+      onSelect
+    )
+  );
+
+  const editorStyle: React.CSSProperties = editable
+    ? {
+        outline: selected
+          ? "2px solid #4c8dff"
+          : "1px solid transparent",
+        outlineOffset: -1,
+        cursor: "pointer"
+      }
+    : {};
+
+  const finalStyle = {
+    ...style,
+    ...editorStyle
+  };
 
   switch (node.type) {
-    case "section": {
-      const style: CSSProperties = {
-        boxSizing: "border-box",
-        width: "100%",
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "flex-start",
-        alignItems: "stretch",
-        gap: 24,
-        paddingTop: 56,
-        paddingRight: 40,
-        paddingBottom: 56,
-        paddingLeft: 40,
-        position: "relative",
-        ...customStyles
-      };
-
-      return wrapLink(
-        node,
-        createElement(
-          "section",
-          {
-            "data-sytely-id": node.id,
-            "data-sytely-type": node.type,
-            style
-          },
-          childContent
-        )
+    case "section":
+      return (
+        <section
+          {...commonProps}
+          style={finalStyle}
+        >
+          {children}
+        </section>
       );
-    }
 
     case "heading":
-      return wrapLink(
-        node,
-        createElement(
-          "h2",
-          {
-            "data-sytely-id": node.id,
-            "data-sytely-type": node.type,
-            style: {
-              margin: 0,
-              ...customStyles
-            }
-          },
-          getString(props, "text", "Heading")
-        )
+      return (
+        <h2 {...commonProps} style={finalStyle}>
+          {node.content || "Heading"}
+          {children}
+        </h2>
       );
 
-    case "text":
-      return wrapLink(
-        node,
-        createElement(
-          "p",
-          {
-            "data-sytely-id": node.id,
-            "data-sytely-type": node.type,
-            style: {
-              margin: 0,
-              lineHeight: 1.6,
-              ...customStyles
-            }
-          },
-          getString(props, "text", "Text")
-        )
+    case "paragraph":
+      return (
+        <p {...commonProps} style={finalStyle}>
+          {node.content || "Start writing here..."}
+          {children}
+        </p>
       );
 
-    case "image": {
-      const src = getString(props, "src");
-      const alt = getString(props, "alt", "Image");
-
-      if (!src) {
-        return wrapLink(
-          node,
-          createElement(
-            "div",
-            {
-              "data-sytely-id": node.id,
-              "data-sytely-type": node.type,
-              style: {
+    case "button":
+      return (
+        <div {...commonProps} style={finalStyle}>
+          <LinkWrapper href={node.href}>
+            <button
+              type="button"
+              style={{
                 width: "100%",
-                height: 220,
-                minWidth: 120,
-                background:
-                  "repeating-linear-gradient(45deg,#f1f1f1 0,#f1f1f1 8px,#e7e7e7 8px,#e7e7e7 16px)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#777",
-                ...customStyles
-              }
-            },
-            "Image"
-          )
-        );
-      }
+                height: "100%",
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                cursor: "pointer"
+              }}
+            >
+              {node.content || "Button"}
+            </button>
+          </LinkWrapper>
+          {children}
+        </div>
+      );
 
-      return wrapLink(
-        node,
-        createElement("img", {
-          "data-sytely-id": node.id,
-          "data-sytely-type": node.type,
-          src,
-          alt,
-          style: {
-            display: "block",
-            maxWidth: "100%",
-            height: "auto",
-            objectFit: "cover",
-            ...customStyles
+    case "image":
+      return (
+        <img
+          {...commonProps}
+          src={
+            node.src ||
+            "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=1200&q=80"
           }
-        })
+          alt={node.alt || ""}
+          style={{
+            ...finalStyle,
+            display: "block"
+          }}
+        />
       );
-    }
 
-    case "button": {
-      const text = getString(props, "text", "Button");
-      const linkTo = getString(props, "linkTo");
-
-      const buttonStyle: CSSProperties = {
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: "fit-content",
-        padding: "12px 20px",
-        border: "none",
-        borderRadius: 8,
-        cursor: "pointer",
-        textDecoration: "none",
-        ...customStyles
-      };
-
-      if (linkTo) {
-        return createElement(
-          "a",
-          {
-            "data-sytely-id": node.id,
-            "data-sytely-type": node.type,
-            href: linkTo,
-            style: buttonStyle
-          },
-          text
-        );
-      }
-
-      return createElement(
-        "button",
-        {
-          "data-sytely-id": node.id,
-          "data-sytely-type": node.type,
-          type: "button",
-          style: buttonStyle
-        },
-        text
+    case "video":
+      return (
+        <video
+          {...commonProps}
+          src={node.src}
+          controls={!editable}
+          style={finalStyle}
+        />
       );
-    }
+
+    case "divider":
+      return (
+        <hr
+          {...commonProps}
+          style={finalStyle}
+        />
+      );
+
+    case "icon":
+      return (
+        <div {...commonProps} style={finalStyle}>
+          {node.content || "★"}
+          {children}
+        </div>
+      );
+
+    case "logo":
+      return (
+        <div {...commonProps} style={finalStyle}>
+          {node.content || "Sytely"}
+          {children}
+        </div>
+      );
+
+    case "menu":
+      return (
+        <nav {...commonProps} style={finalStyle}>
+          {node.content || "Home   About   Contact"}
+          {children}
+        </nav>
+      );
+
+    case "social":
+      return (
+        <div {...commonProps} style={finalStyle}>
+          {node.content || "Instagram   X   Facebook"}
+          {children}
+        </div>
+      );
+
+    case "form":
+      return (
+        <form {...commonProps} style={finalStyle}>
+          <input
+            placeholder="Email address"
+            style={{
+              width: "100%",
+              padding: 12,
+              marginBottom: 8
+            }}
+          />
+          <button type="submit">Submit</button>
+          {children}
+        </form>
+      );
+
+    case "gallery":
+      return (
+        <div
+          {...commonProps}
+          style={{
+            ...finalStyle,
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: style.gap || "12px"
+          }}
+        >
+          {[
+            "https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=600&q=80",
+            "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=600&q=80",
+            "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=600&q=80"
+          ].map((src) => (
+            <img
+              key={src}
+              src={src}
+              alt=""
+              style={{
+                width: "100%",
+                aspectRatio: "1",
+                objectFit: "cover",
+                borderRadius: 8
+              }}
+            />
+          ))}
+          {children}
+        </div>
+      );
+
+    case "group":
+      return (
+        <div {...commonProps} style={finalStyle}>
+          {children}
+        </div>
+      );
 
     default:
-      return null;
+      return (
+        <Fragment>
+          {children}
+        </Fragment>
+      );
   }
 }
+
+export function SytelyRenderer({
+  nodes,
+  breakpoint = "desktop",
+  editable = false,
+  selectedIds = [],
+  onSelect
+}: RendererProps) {
+  return (
+    <>
+      {nodes.map((node) =>
+        renderNode(
+          node,
+          breakpoint,
+          editable,
+          selectedIds,
+          onSelect
+        )
+      )}
+    </>
+  );
+}
+
+export default SytelyRenderer;

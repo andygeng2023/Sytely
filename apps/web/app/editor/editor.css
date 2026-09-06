@@ -1,2764 +1,436 @@
-"use client";
-
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type DragEvent,
-  type PointerEvent as ReactPointerEvent
-} from "react";
-import { renderNode } from "@sytely/renderer";
-import type {
-  ComponentNode,
-  ComponentType,
-  Site,
-  SitePage
-} from "@sytely/types";
-import "./editor.css";
-
-type DragPayload =
-  | {
-      kind: "component";
-      componentType: ComponentType;
-    }
-  | {
-      kind: "template";
-      templateId: string;
-    }
-  | {
-      kind: "node";
-      nodeId: string;
-    };
-
-type DropPosition = "before" | "after" | "inside";
-
-interface DropTarget {
-  id: string | null;
-  position: DropPosition;
+* {
+  box-sizing: border-box;
 }
 
-interface Template {
-  id: string;
-  name: string;
-  node: ComponentNode;
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
-interface ResizeState {
-  id: string;
-  startX: number;
-  startY: number;
-  startWidth: number;
-  startHeight: number;
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
-const DEFAULT_SECTION_PADDING = 56;
-
-function newId(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return crypto.randomUUID();
-  }
-
-  return `node-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
 }
 
-function node(
-  id: string,
-  type: ComponentType,
-  props: Record<string, unknown> = {},
-  styles: Record<string, unknown> = {},
-  children?: ComponentNode[]
-): ComponentNode {
-  return {
-    id,
-    type,
-    props,
-    styles,
-    ...(children ? { children } : {})
-  };
+button:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
-function section(
-  id: string,
-  children: ComponentNode[],
-  styles: Record<string, unknown> = {}
-): ComponentNode {
-  return node(
-    id,
-    "section",
-    {},
-    {
-      paddingTop: DEFAULT_SECTION_PADDING,
-      paddingRight: 40,
-      paddingBottom: DEFAULT_SECTION_PADDING,
-      paddingLeft: 40,
-      ...styles
-    },
-    children
-  );
+.sytely-editor {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #f5f6f8;
+  color: #202124;
 }
 
-/*
- * IMPORTANT:
- * Every template ID is deterministic.
- * Random IDs are created only when a user actually drops/clones a template.
- */
-const templates: Template[] = [
-  {
-    id: "hero",
-    name: "Hero",
-    node: section(
-      "tpl-hero",
-      [
-        node(
-          "tpl-hero-heading",
-          "heading",
-          { text: "Build something people remember" },
-          {
-            fontSize: 52,
-            fontWeight: 700,
-            textAlign: "center",
-            width: "100%"
-          }
-        ),
-        node(
-          "tpl-hero-text",
-          "text",
-          {
-            text: "Create polished websites visually without writing code."
-          },
-          {
-            fontSize: 18,
-            textAlign: "center",
-            width: "100%",
-            maxWidth: 700,
-            alignSelf: "center"
-          }
-        ),
-        node(
-          "tpl-hero-button",
-          "button",
-          { text: "Get started" },
-          {
-            alignSelf: "center",
-            background: "#111",
-            color: "#fff"
-          }
-        )
-      ],
-      {
-        alignItems: "center",
-        gap: 20,
-        background: "#fff"
-      }
-    )
-  },
-
-  {
-    id: "split",
-    name: "Split",
-    node: section(
-      "tpl-split",
-      [
-        node(
-          "tpl-split-content",
-          "section",
-          {},
-          {
-            gap: 16,
-            paddingTop: 0,
-            paddingRight: 0,
-            paddingBottom: 0,
-            paddingLeft: 0
-          },
-          [
-            node(
-              "tpl-split-heading",
-              "heading",
-              { text: "A clear message" },
-              { fontSize: 38, fontWeight: 700 }
-            ),
-            node(
-              "tpl-split-text",
-              "text",
-              {
-                text: "Use sections to create structure and arrange normal components inside them."
-              }
-            ),
-            node(
-              "tpl-split-button",
-              "button",
-              { text: "Learn more" },
-              { background: "#111", color: "#fff" }
-            )
-          ]
-        ),
-        node(
-          "tpl-split-image",
-          "image",
-          { src: "", alt: "Placeholder image" },
-          {
-            width: "100%",
-            height: 280
-          }
-        )
-      ],
-      {
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        alignItems: "center",
-        gap: 48,
-        background: "#fff"
-      }
-    )
-  },
-
-  {
-    id: "features",
-    name: "Features",
-    node: section(
-      "tpl-features",
-      [
-        node(
-          "tpl-features-heading",
-          "heading",
-          { text: "Everything in one place" },
-          { fontSize: 38, fontWeight: 700, textAlign: "center" }
-        ),
-        node(
-          "tpl-features-text",
-          "text",
-          {
-            text: "Build pages from reusable sections and ordinary components."
-          },
-          { textAlign: "center" }
-        ),
-        section(
-          "tpl-feature-grid",
-          [
-            node(
-              "tpl-feature-1",
-              "section",
-              {},
-              { padding: 28, background: "#f6f6f6", gap: 12 },
-              [
-                node(
-                  "tpl-feature-1-heading",
-                  "heading",
-                  { text: "Visual editing" },
-                  { fontSize: 22, fontWeight: 700 }
-                ),
-                node(
-                  "tpl-feature-1-text",
-                  "text",
-                  { text: "Move, resize and organize components directly on the canvas." }
-                )
-              ]
-            ),
-            node(
-              "tpl-feature-2",
-              "section",
-              {},
-              { padding: 28, background: "#f6f6f6", gap: 12 },
-              [
-                node(
-                  "tpl-feature-2-heading",
-                  "heading",
-                  { text: "Responsive layouts" },
-                  { fontSize: 22, fontWeight: 700 }
-                ),
-                node(
-                  "tpl-feature-2-text",
-                  "text",
-                  { text: "Control layout, spacing and alignment without code." }
-                )
-              ]
-            ),
-            node(
-              "tpl-feature-3",
-              "section",
-              {},
-              { padding: 28, background: "#f6f6f6", gap: 12 },
-              [
-                node(
-                  "tpl-feature-3-heading",
-                  "heading",
-                  { text: "Reusable sections" },
-                  { fontSize: 22, fontWeight: 700 }
-                ),
-                node(
-                  "tpl-feature-3-text",
-                  "text",
-                  { text: "Save time with ready-made page sections." }
-                )
-              ]
-            )
-          ],
-          {
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(3,minmax(0,1fr))",
-            paddingTop: 8,
-            paddingRight: 0,
-            paddingBottom: 0,
-            paddingLeft: 0,
-            gap: 20
-          }
-        )
-      ],
-      {
-        gap: 20,
-        background: "#fff"
-      }
-    )
-  },
-
-  {
-    id: "cta",
-    name: "CTA",
-    node: section(
-      "tpl-cta",
-      [
-        node(
-          "tpl-cta-heading",
-          "heading",
-          { text: "Ready to build your next page?" },
-          {
-            fontSize: 38,
-            fontWeight: 700,
-            textAlign: "center"
-          }
-        ),
-        node(
-          "tpl-cta-text",
-          "text",
-          { text: "Start with a section and customize every part." },
-          { textAlign: "center" }
-        ),
-        node(
-          "tpl-cta-button",
-          "button",
-          { text: "Start building" },
-          {
-            alignSelf: "center",
-            background: "#111",
-            color: "#fff"
-          }
-        )
-      ],
-      {
-        alignItems: "center",
-        gap: 18,
-        background: "#f1f1f1"
-      }
-    )
-  },
-
-  {
-    id: "contact",
-    name: "Contact",
-    node: section(
-      "tpl-contact",
-      [
-        node(
-          "tpl-contact-heading",
-          "heading",
-          { text: "Let's talk" },
-          { fontSize: 38, fontWeight: 700 }
-        ),
-        node(
-          "tpl-contact-text",
-          "text",
-          {
-            text: "Tell visitors how they can reach you."
-          }
-        ),
-        node(
-          "tpl-contact-button",
-          "button",
-          { text: "Contact us" },
-          {
-            background: "#111",
-            color: "#fff"
-          }
-        )
-      ],
-      {
-        gap: 18,
-        background: "#fff"
-      }
-    )
-  },
-
-  {
-    id: "stats",
-    name: "Stats",
-    node: section(
-      "tpl-stats",
-      [
-        section(
-          "tpl-stat-grid",
-          [
-            node(
-              "tpl-stat-1",
-              "section",
-              {},
-              {
-                padding: 20,
-                background: "#f5f5f5",
-                gap: 8,
-                alignItems: "center"
-              },
-              [
-                node(
-                  "tpl-stat-1-heading",
-                  "heading",
-                  { text: "10k+" },
-                  { fontSize: 34, fontWeight: 700 }
-                ),
-                node(
-                  "tpl-stat-1-text",
-                  "text",
-                  { text: "Projects" }
-                )
-              ]
-            ),
-            node(
-              "tpl-stat-2",
-              "section",
-              {},
-              {
-                padding: 20,
-                background: "#f5f5f5",
-                gap: 8,
-                alignItems: "center"
-              },
-              [
-                node(
-                  "tpl-stat-2-heading",
-                  "heading",
-                  { text: "99%" },
-                  { fontSize: 34, fontWeight: 700 }
-                ),
-                node(
-                  "tpl-stat-2-text",
-                  "text",
-                  { text: "Satisfaction" }
-                )
-              ]
-            ),
-            node(
-              "tpl-stat-3",
-              "section",
-              {},
-              {
-                padding: 20,
-                background: "#f5f5f5",
-                gap: 8,
-                alignItems: "center"
-              },
-              [
-                node(
-                  "tpl-stat-3-heading",
-                  "heading",
-                  { text: "24/7" },
-                  { fontSize: 34, fontWeight: 700 }
-                ),
-                node(
-                  "tpl-stat-3-text",
-                  "text",
-                  { text: "Availability" }
-                )
-              ]
-            )
-          ],
-          {
-            display: "grid",
-            gridTemplateColumns:
-              "repeat(3,minmax(0,1fr))",
-            paddingTop: 0,
-            paddingRight: 0,
-            paddingBottom: 0,
-            paddingLeft: 0,
-            gap: 20
-          }
-        )
-      ],
-      {
-        background: "#fff"
-      }
-    )
-  }
-];
-
-const initialSite: Site = {
-  id: "site-1",
-  name: "Sytely Site",
-  version: 1,
-  pages: [
-    {
-      id: "page-home",
-      name: "Home",
-      slug: "/",
-      margins: {
-        top: 0,
-        right: 32,
-        bottom: 0,
-        left: 32
-      },
-      styles: {
-        background: "#ffffff"
-      },
-      components: [
-        templates[0].node,
-        templates[2].node
-      ]
-    },
-    {
-      id: "page-about",
-      name: "About",
-      slug: "/about",
-      margins: {
-        top: 0,
-        right: 32,
-        bottom: 0,
-        left: 32
-      },
-      styles: {
-        background: "#ffffff"
-      },
-      components: []
-    }
-  ]
-};
-
-function cloneWithNewIds(input: ComponentNode): ComponentNode {
-  return {
-    ...input,
-    id: newId(),
-    props: { ...input.props },
-    styles: { ...(input.styles ?? {}) },
-    children: input.children?.map(cloneWithNewIds)
-  };
+.topbar {
+  height: 56px;
+  flex: 0 0 56px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e5e9;
+  z-index: 20;
 }
 
-function makeComponent(type: ComponentType): ComponentNode {
-  const id = newId();
-
-  switch (type) {
-    case "section":
-      return section(id, []);
-
-    case "heading":
-      return node(
-        id,
-        "heading",
-        { text: "Heading" },
-        { fontSize: 32, fontWeight: 700 }
-      );
-
-    case "text":
-      return node(
-        id,
-        "text",
-        { text: "Add your text here." }
-      );
-
-    case "image":
-      return node(
-        id,
-        "image",
-        { src: "", alt: "Image" },
-        { width: 320, height: 220 }
-      );
-
-    case "button":
-      return node(
-        id,
-        "button",
-        { text: "Button" },
-        {
-          background: "#111",
-          color: "#fff"
-        }
-      );
-  }
+.brand {
+  width: 110px;
+  font-size: 19px;
+  font-weight: 750;
 }
 
-function findNode(
-  nodes: ComponentNode[],
-  id: string
-): ComponentNode | null {
-  for (const item of nodes) {
-    if (item.id === id) {
-      return item;
-    }
-
-    const found = findNode(item.children ?? [], id);
-
-    if (found) {
-      return found;
-    }
-  }
-
-  return null;
+.topbar button {
+  min-width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  padding: 0 10px;
 }
 
-function containsNode(
-  nodeItem: ComponentNode,
-  id: string
-): boolean {
-  if (nodeItem.id === id) {
-    return true;
-  }
-
-  return (nodeItem.children ?? []).some((child) =>
-    containsNode(child, id)
-  );
+.topbar button:hover {
+  background: #f0f2f5;
 }
 
-function removeNode(
-  nodes: ComponentNode[],
-  id: string
-): {
-  nodes: ComponentNode[];
-  removed: ComponentNode | null;
-} {
-  let removed: ComponentNode | null = null;
-  const result: ComponentNode[] = [];
-
-  for (const item of nodes) {
-    if (item.id === id) {
-      removed = item;
-      continue;
-    }
-
-    const childResult = removeNode(item.children ?? [], id);
-
-    if (childResult.removed) {
-      removed = childResult.removed;
-    }
-
-    result.push({
-      ...item,
-      children:
-        item.children !== undefined
-          ? childResult.nodes
-          : undefined
-    });
-  }
-
-  return { nodes: result, removed };
+.topbar .primary-button,
+.topbar .publish-button {
+  color: white;
 }
 
-function insertNode(
-  nodes: ComponentNode[],
-  targetId: string,
-  itemToInsert: ComponentNode,
-  position: DropPosition
-): ComponentNode[] {
-  const result: ComponentNode[] = [];
-
-  for (const item of nodes) {
-    if (item.id === targetId) {
-      if (position === "before") {
-        result.push(itemToInsert, item);
-      } else if (position === "after") {
-        result.push(item, itemToInsert);
-      } else {
-        result.push({
-          ...item,
-          children: [
-            ...(item.children ?? []),
-            itemToInsert
-          ]
-        });
-      }
-
-      continue;
-    }
-
-    result.push({
-      ...item,
-      children:
-        item.children !== undefined
-          ? insertNode(
-              item.children,
-              targetId,
-              itemToInsert,
-              position
-            )
-          : undefined
-    });
-  }
-
-  return result;
+.primary-button {
+  background: #2563eb !important;
 }
 
-function updateNode(
-  nodes: ComponentNode[],
-  id: string,
-  updater: (node: ComponentNode) => ComponentNode
-): ComponentNode[] {
-  return nodes.map((item) => {
-    if (item.id === id) {
-      return updater(item);
-    }
-
-    return {
-      ...item,
-      children:
-        item.children !== undefined
-          ? updateNode(item.children, id, updater)
-          : undefined
-    };
-  });
+.publish-button {
+  background: #111827 !important;
 }
 
-function collectNodes(
-  nodes: ComponentNode[],
-  result: ComponentNode[] = []
-): ComponentNode[] {
-  for (const item of nodes) {
-    result.push(item);
-    collectNodes(item.children ?? [], result);
-  }
-
-  return result;
+.top-spacer {
+  flex: 1;
 }
 
-function parseNumber(
-  value: unknown,
-  fallback: number
-): number {
-  const parsed = Number.parseFloat(String(value ?? ""));
-
-  return Number.isFinite(parsed)
-    ? parsed
-    : fallback;
+.device-switcher {
+  display: flex;
+  background: #f1f3f5;
+  padding: 3px;
+  border-radius: 8px;
 }
 
-function getStyleValue(
-  nodeItem: ComponentNode,
-  key: string
-): unknown {
-  return nodeItem.styles?.[key];
+.device-switcher button {
+  height: 30px;
 }
 
-function EditorNode({
-  nodeItem,
-  selectedIds,
-  dropTarget,
-  onSelect,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  onResizeStart,
-  onDelete
-}: {
-  nodeItem: ComponentNode;
-  selectedIds: string[];
-  dropTarget: DropTarget | null;
-  onSelect: (
-    id: string,
-    additive: boolean
-  ) => void;
-  onDragStart: (
-    event: DragEvent,
-    id: string
-  ) => void;
-  onDragOver: (
-    event: DragEvent,
-    nodeItem: ComponentNode
-  ) => void;
-  onDrop: (
-    event: DragEvent,
-    nodeItem: ComponentNode
-  ) => void;
-  onDragEnd: () => void;
-  onResizeStart: (
-    event: ReactPointerEvent<HTMLDivElement>,
-    id: string
-  ) => void;
-  onDelete: (id: string) => void;
-}) {
-  const selected = selectedIds.includes(nodeItem.id);
-  const children = nodeItem.children ?? [];
-
-  const dropClass =
-    dropTarget?.id === nodeItem.id
-      ? `drop-${dropTarget.position}`
-      : "";
-
-  const width =
-    getStyleValue(nodeItem, "width") ??
-    (nodeItem.type === "section"
-      ? "100%"
-      : "fit-content");
-
-  const visual =
-    nodeItem.type === "section"
-      ? renderNode(nodeItem, {
-          children: children.length ? (
-            <>
-              {children.map((child) => (
-                <EditorNode
-                  key={child.id}
-                  nodeItem={child}
-                  selectedIds={selectedIds}
-                  dropTarget={dropTarget}
-                  onSelect={onSelect}
-                  onDragStart={onDragStart}
-                  onDragOver={onDragOver}
-                  onDrop={onDrop}
-                  onDragEnd={onDragEnd}
-                  onResizeStart={onResizeStart}
-                  onDelete={onDelete}
-                />
-              ))}
-            </>
-          ) : (
-            <div className="empty-section">
-              Drop components here
-            </div>
-          )
-        })
-      : renderNode(nodeItem, {
-          renderChildren: false
-        });
-
-  return (
-    <div
-      className={[
-        "editor-node",
-        nodeItem.type === "section"
-          ? "section-node"
-          : "",
-        selected ? "selected" : "",
-        dropClass
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      style={{ width: String(width) }}
-      draggable
-      onDragStart={(event) =>
-        onDragStart(event, nodeItem.id)
-      }
-      onDragEnd={onDragEnd}
-      onDragOver={(event) =>
-        onDragOver(event, nodeItem)
-      }
-      onDrop={(event) =>
-        onDrop(event, nodeItem)
-      }
-      onPointerDown={(event) => {
-        if (event.button !== 0) {
-          return;
-        }
-
-        onSelect(
-          nodeItem.id,
-          event.shiftKey || event.metaKey || event.ctrlKey
-        );
-      }}
-    >
-      <div className="node-visual">
-        {visual}
-
-        {nodeItem.type === "section" && (
-          <div className="padding-overlay">
-            <span className="padding-label">
-              padding
-            </span>
-          </div>
-        )}
-      </div>
-
-      {selected && (
-        <>
-          <div className="node-label">
-            {nodeItem.type}
-          </div>
-
-          <div
-            className="resize-handle resize-right"
-            onPointerDown={(event) =>
-              onResizeStart(event, nodeItem.id)
-            }
-          />
-
-          <div
-            className="resize-handle resize-bottom"
-            onPointerDown={(event) =>
-              onResizeStart(event, nodeItem.id)
-            }
-          />
-
-          <div
-            className="resize-handle resize-corner"
-            onPointerDown={(event) =>
-              onResizeStart(event, nodeItem.id)
-            }
-          />
-
-          <button
-            type="button"
-            className="node-delete"
-            onPointerDown={(event) =>
-              event.stopPropagation()
-            }
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(nodeItem.id);
-            }}
-          >
-            ×
-          </button>
-        </>
-      )}
-    </div>
-  );
+.device-switcher button.active {
+  background: white;
+  box-shadow: 0 1px 4px #0002;
 }
 
-export default function EditorPage() {
-  const [site, setSite] = useState<Site>(initialSite);
-  const [activePageId, setActivePageId] =
-    useState("page-home");
-
-  const [selectedIds, setSelectedIds] = useState<string[]>(
-    []
-  );
-
-  const [pageSelected, setPageSelected] =
-    useState(false);
-
-  const [dropTarget, setDropTarget] =
-    useState<DropTarget | null>(null);
-
-  const [dragLabel, setDragLabel] =
-    useState<string | null>(null);
-
-  const [dragPoint, setDragPoint] = useState({
-    x: 0,
-    y: 0
-  });
-
-  const [zoom, setZoom] = useState(100);
-  const [preview, setPreview] = useState(false);
-
-  const [marquee, setMarquee] = useState<{
-    startX: number;
-    startY: number;
-    currentX: number;
-    currentY: number;
-  } | null>(null);
-
-  const [resizeState, setResizeState] =
-    useState<ResizeState | null>(null);
-
-  const canvasRef = useRef<HTMLDivElement | null>(
-    null
-  );
-
-  const activePage = site.pages.find(
-    (page) => page.id === activePageId
-  ) ?? site.pages[0];
-
-  const allNodes = useMemo(
-    () => collectNodes(activePage?.components ?? []),
-    [activePage]
-  );
-
-  const selectedNodes = useMemo(
-    () =>
-      allNodes.filter((item) =>
-        selectedIds.includes(item.id)
-      ),
-    [allNodes, selectedIds]
-  );
-
-  const selectedNode =
-    selectedIds.length === 1
-      ? allNodes.find(
-          (item) => item.id === selectedIds[0]
-        ) ?? null
-      : null;
-
-  function updatePage(
-    updater: (page: SitePage) => SitePage
-  ) {
-    setSite((current) => ({
-      ...current,
-      pages: current.pages.map((page) =>
-        page.id === activePageId
-          ? updater(page)
-          : page
-      )
-    }));
-  }
-
-  function updateSelectedNodes(
-    updater: (nodeItem: ComponentNode) => ComponentNode
-  ) {
-    updatePage((page) => ({
-      ...page,
-      components: selectedIds.reduce(
-        (components, id) =>
-          updateNode(
-            components,
-            id,
-            updater
-          ),
-        page.components
-      )
-    }));
-  }
-
-  function select(
-    id: string,
-    additive: boolean
-  ) {
-    setPageSelected(false);
-
-    if (additive) {
-      setSelectedIds((current) =>
-        current.includes(id)
-          ? current.filter((item) => item !== id)
-          : [...current, id]
-      );
-      return;
-    }
-
-    setSelectedIds([id]);
-  }
-
-  function deleteNode(id: string) {
-    updatePage((page) => ({
-      ...page,
-      components: removeNode(
-        page.components,
-        id
-      ).nodes
-    }));
-
-    setSelectedIds((current) =>
-      current.filter((item) => item !== id)
-    );
-  }
-
-  function handlePaletteDragStart(
-    event: DragEvent,
-    payload: DragPayload,
-    label: string
-  ) {
-    event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData(
-      "application/x-sytely",
-      JSON.stringify(payload)
-    );
-
-    setDragLabel(label);
-  }
-
-  function handleNodeDragStart(
-    event: DragEvent,
-    id: string
-  ) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData(
-      "application/x-sytely",
-      JSON.stringify({
-        kind: "node",
-        nodeId: id
-      } satisfies DragPayload)
-    );
-
-    setDragLabel(
-      selectedIds.length > 1 &&
-        selectedIds.includes(id)
-        ? `${selectedIds.length} components`
-        : "Component"
-    );
-  }
-
-  function getDropPosition(
-    event: DragEvent,
-    target: ComponentNode
-  ): DropPosition {
-    const rect =
-      event.currentTarget.getBoundingClientRect();
-
-    const y =
-      (event.clientY - rect.top) / rect.height;
-
-    if (
-      target.type === "section" &&
-      y > 0.25 &&
-      y < 0.75
-    ) {
-      return "inside";
-    }
-
-    return y <= 0.5 ? "before" : "after";
-  }
-
-  function handleNodeDragOver(
-    event: DragEvent,
-    target: ComponentNode
-  ) {
-    event.preventDefault();
-
-    const payloadText =
-      event.dataTransfer.types.includes(
-        "application/x-sytely"
-      );
-
-    if (!payloadText) {
-      return;
-    }
-
-    if (
-      target.type !== "section" &&
-      getDropPosition(event, target) === "inside"
-    ) {
-      return;
-    }
-
-    setDropTarget({
-      id: target.id,
-      position: getDropPosition(event, target)
-    });
-
-    setDragPoint({
-      x: event.clientX,
-      y: event.clientY
-    });
-  }
-
-  function handleCanvasDragOver(
-    event: DragEvent
-  ) {
-    event.preventDefault();
-
-    setDragPoint({
-      x: event.clientX,
-      y: event.clientY
-    });
-  }
-
-  function readPayload(
-    event: DragEvent
-  ): DragPayload | null {
-    const value = event.dataTransfer.getData(
-      "application/x-sytely"
-    );
-
-    if (!value) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(value) as DragPayload;
-    } catch {
-      return null;
-    }
-  }
-
-  function insertNewComponent(
-    page: SitePage,
-    newNode: ComponentNode
-  ): SitePage {
-    const target = dropTarget?.id
-      ? findNode(page.components, dropTarget.id)
-      : null;
-
-    if (
-      target?.type === "section" &&
-      dropTarget?.position === "inside"
-    ) {
-      return {
-        ...page,
-        components: insertNode(
-          page.components,
-          target.id,
-          newNode,
-          "inside"
-        )
-      };
-    }
-
-    const firstSection = page.components.find(
-      (item) => item.type === "section"
-    );
-
-    if (!target && firstSection) {
-      return {
-        ...page,
-        components: insertNode(
-          page.components,
-          firstSection.id,
-          newNode,
-          "inside"
-        )
-      };
-    }
-
-    if (!target) {
-      const newSection = section(newId(), [
-        newNode
-      ]);
-
-      return {
-        ...page,
-        components: [
-          ...page.components,
-          newSection
-        ]
-      };
-    }
-
-    return {
-      ...page,
-      components: insertNode(
-        page.components,
-        target.id,
-        newNode,
-        dropTarget?.position === "inside"
-          ? "inside"
-          : dropTarget?.position ?? "after"
-      )
-    };
-  }
-
-  function handleDrop(
-    event: DragEvent,
-    target?: ComponentNode
-  ) {
-    event.preventDefault();
-
-    const payload = readPayload(event);
-
-    if (!payload) {
-      return;
-    }
-
-    if (
-      payload.kind === "node" &&
-      target &&
-      containsNode(
-        findNode(activePage.components, payload.nodeId) ??
-          target,
-        target.id
-      )
-    ) {
-      setDropTarget(null);
-      return;
-    }
-
-    if (payload.kind === "component") {
-      const newNode = makeComponent(
-        payload.componentType
-      );
-
-      updatePage((page) =>
-        insertNewComponent(page, newNode)
-      );
-
-      setSelectedIds([newNode.id]);
-    }
-
-    if (payload.kind === "template") {
-      const template = templates.find(
-        (item) => item.id === payload.templateId
-      );
-
-      if (!template) {
-        return;
-      }
-
-      const cloned = cloneWithNewIds(
-        template.node
-      );
-
-      updatePage((page) => ({
-        ...page,
-        components: [
-          ...page.components,
-          cloned
-        ]
-      }));
-
-      setSelectedIds([cloned.id]);
-    }
-
-    if (payload.kind === "node") {
-      const moving = findNode(
-        activePage.components,
-        payload.nodeId
-      );
-
-      if (!moving) {
-        return;
-      }
-
-      if (
-        target &&
-        containsNode(moving, target.id)
-      ) {
-        setDropTarget(null);
-        return;
-      }
-
-      updatePage((page) => {
-        const removed = removeNode(
-          page.components,
-          payload.nodeId
-        );
-
-        if (!removed.removed) {
-          return page;
-        }
-
-        if (!target) {
-          return {
-            ...page,
-            components: [
-              ...removed.nodes,
-              removed.removed
-            ]
-          };
-        }
-
-        return {
-          ...page,
-          components: insertNode(
-            removed.nodes,
-            target.id,
-            removed.removed,
-            dropTarget?.position ?? "after"
-          )
-        };
-      });
-    }
-
-    setDropTarget(null);
-    setDragLabel(null);
-  }
-
-  function startMarquee(
-    event: ReactPointerEvent<HTMLDivElement>
-  ) {
-    if (event.button !== 0) {
-      return;
-    }
-
-    if (
-      (event.target as HTMLElement).closest(
-        ".editor-node"
-      )
-    ) {
-      return;
-    }
-
-    const rect =
-      canvasRef.current?.getBoundingClientRect();
-
-    if (!rect) {
-      return;
-    }
-
-    setPageSelected(true);
-    setSelectedIds([]);
-
-    setMarquee({
-      startX: event.clientX,
-      startY: event.clientY,
-      currentX: event.clientX,
-      currentY: event.clientY
-    });
-  }
-
-  useEffect(() => {
-    if (!marquee) {
-      return;
-    }
-
-    function move(event: PointerEvent) {
-      setMarquee((current) =>
-        current
-          ? {
-              ...current,
-              currentX: event.clientX,
-              currentY: event.clientY
-            }
-          : null
-      );
-    }
-
-    function up() {
-      setMarquee((current) => {
-        if (!current) {
-          return null;
-        }
-
-        const left = Math.min(
-          current.startX,
-          current.currentX
-        );
-        const right = Math.max(
-          current.startX,
-          current.currentX
-        );
-        const top = Math.min(
-          current.startY,
-          current.currentY
-        );
-        const bottom = Math.max(
-          current.startY,
-          current.currentY
-        );
-
-        const selected = allNodes
-          .filter((item) => {
-            const element =
-              document.querySelector<HTMLElement>(
-                `[data-sytely-id="${item.id}"]`
-              );
-
-            if (!element) {
-              return false;
-            }
-
-            const rect =
-              element.getBoundingClientRect();
-
-            return (
-              rect.left < right &&
-              rect.right > left &&
-              rect.top < bottom &&
-              rect.bottom > top
-            );
-          })
-          .map((item) => item.id);
-
-        if (
-          Math.abs(right - left) > 5 ||
-          Math.abs(bottom - top) > 5
-        ) {
-          setSelectedIds(selected);
-          setPageSelected(false);
-        }
-
-        return null;
-      });
-    }
-
-    window.addEventListener(
-      "pointermove",
-      move
-    );
-    window.addEventListener(
-      "pointerup",
-      up,
-      { once: true }
-    );
-
-    return () => {
-      window.removeEventListener(
-        "pointermove",
-        move
-      );
-    };
-  }, [marquee, allNodes]);
-
-  useEffect(() => {
-    if (!resizeState) {
-      return;
-    }
-
-    function move(event: PointerEvent) {
-      const dx =
-        (event.clientX -
-          resizeState.startX) /
-        (zoom / 100);
-
-      const dy =
-        (event.clientY -
-          resizeState.startY) /
-        (zoom / 100);
-
-      updatePage((page) => ({
-        ...page,
-        components: updateNode(
-          page.components,
-          resizeState.id,
-          (item) => ({
-            ...item,
-            styles: {
-              ...(item.styles ?? {}),
-              width: Math.max(
-                80,
-                resizeState.startWidth + dx
-              ),
-              height: Math.max(
-                40,
-                resizeState.startHeight + dy
-              )
-            }
-          })
-        )
-      }));
-    }
-
-    function up() {
-      setResizeState(null);
-    }
-
-    window.addEventListener(
-      "pointermove",
-      move
-    );
-    window.addEventListener(
-      "pointerup",
-      up,
-      { once: true }
-    );
-
-    return () => {
-      window.removeEventListener(
-        "pointermove",
-        move
-      );
-    };
-  }, [resizeState, zoom]);
-
-  function startResize(
-    event: ReactPointerEvent<HTMLDivElement>,
-    id: string
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const element =
-      document.querySelector<HTMLElement>(
-        `[data-sytely-id="${id}"]`
-      );
-
-    if (!element) {
-      return;
-    }
-
-    const rect =
-      element.getBoundingClientRect();
-
-    setResizeState({
-      id,
-      startX: event.clientX,
-      startY: event.clientY,
-      startWidth:
-        rect.width / (zoom / 100),
-      startHeight:
-        rect.height / (zoom / 100)
-    });
-  }
-
-  function groupSelected() {
-    if (selectedIds.length < 2) {
-      return;
-    }
-
-    const selectedSet = new Set(selectedIds);
-
-    const group = section(
-      newId(),
-      selectedNodes.map((item) => item),
-      {
-        paddingTop: DEFAULT_SECTION_PADDING,
-        paddingRight: 40,
-        paddingBottom: DEFAULT_SECTION_PADDING,
-        paddingLeft: 40
-      }
-    );
-
-    updatePage((page) => {
-      const remaining = page.components.filter(
-        (item) => !selectedSet.has(item.id)
-      );
-
-      return {
-        ...page,
-        components: [
-          ...remaining,
-          group
-        ]
-      };
-    });
-
-    setSelectedIds([group.id]);
-  }
-
-  function ungroupSelected() {
-    if (
-      selectedNodes.length !== 1 ||
-      selectedNodes[0].type !== "section"
-    ) {
-      return;
-    }
-
-    const group = selectedNodes[0];
-
-    updatePage((page) => {
-      const removed = removeNode(
-        page.components,
-        group.id
-      );
-
-      if (!removed.removed) {
-        return page;
-      }
-
-      return {
-        ...page,
-        components: [
-          ...removed.nodes,
-          ...(group.children ?? [])
-        ]
-      };
-    });
-
-    setSelectedIds(
-      (group.children ?? []).map(
-        (item) => item.id
-      )
-    );
-  }
-
-  function addPage() {
-    const id = newId();
-
-    const page: SitePage = {
-      id,
-      name: `Page ${site.pages.length + 1}`,
-      slug: `/page-${site.pages.length + 1}`,
-      margins: {
-        top: 0,
-        right: 32,
-        bottom: 0,
-        left: 32
-      },
-      styles: {
-        background: "#ffffff"
-      },
-      components: []
-    };
-
-    setSite((current) => ({
-      ...current,
-      pages: [
-        ...current.pages,
-        page
-      ]
-    }));
-
-    setActivePageId(id);
-    setSelectedIds([]);
-    setPageSelected(true);
-  }
-
-  function updatePageStyle(
-    key: string,
-    value: unknown
-  ) {
-    updatePage((page) => ({
-      ...page,
-      styles: {
-        ...(page.styles ?? {}),
-        [key]: value
-      }
-    }));
-  }
-
-  function updatePageMargin(
-    key: "top" | "right" | "bottom" | "left",
-    value: number
-  ) {
-    updatePage((page) => ({
-      ...page,
-      margins: {
-        ...page.margins,
-        [key]: value
-      }
-    }));
-  }
-
-  function setNodeStyle(
-    key: string,
-    value: unknown
-  ) {
-    updateSelectedNodes((item) => ({
-      ...item,
-      styles: {
-        ...(item.styles ?? {}),
-        [key]: value
-      }
-    }));
-  }
-
-  function setNodeProp(
-    key: string,
-    value: unknown
-  ) {
-    updateSelectedNodes((item) => ({
-      ...item,
-      props: {
-        ...item.props,
-        [key]: value
-      }
-    }));
-  }
-
-  function alignSection(
-    horizontal:
-      | "left"
-      | "center"
-      | "right",
-    vertical:
-      | "top"
-      | "center"
-      | "bottom"
-  ) {
-    if (!selectedNode) {
-      return;
-    }
-
-    if (selectedNode.type !== "section") {
-      return;
-    }
-
-    const horizontalValue =
-      horizontal === "left"
-        ? "flex-start"
-        : horizontal === "right"
-          ? "flex-end"
-          : "center";
-
-    const verticalValue =
-      vertical === "top"
-        ? "flex-start"
-        : vertical === "bottom"
-          ? "flex-end"
-          : "center";
-
-    updatePage((page) => ({
-      ...page,
-      components: updateNode(
-        page.components,
-        selectedNode.id,
-        (item) => ({
-          ...item,
-          styles: {
-            ...(item.styles ?? {}),
-            alignItems: horizontalValue,
-            justifyContent: verticalValue
-          }
-        })
-      )
-    }));
-  }
-
-  const commonFontSize = (() => {
-    if (!selectedNodes.length) {
-      return "";
-    }
-
-    const values = selectedNodes
-      .filter(
-        (item) =>
-          item.type === "heading" ||
-          item.type === "text" ||
-          item.type === "button"
-      )
-      .map((item) =>
-        getStyleValue(item, "fontSize")
-      );
-
-    if (!values.length) {
-      return "";
-    }
-
-    return values.every(
-      (value) => value === values[0]
-    )
-      ? String(values[0] ?? "")
-      : "";
-  })();
-
-  if (!activePage) {
-    return null;
-  }
-
-  return (
-    <div
-      className={
-        preview
-          ? "editor preview-mode"
-          : "editor"
-      }
-    >
-      {!preview && (
-        <>
-          <header className="topbar">
-            <div className="brand">
-              Sytely
-            </div>
-
-            <div className="page-tabs">
-              {site.pages.map((page) => (
-                <button
-                  key={page.id}
-                  type="button"
-                  className={
-                    page.id === activePageId
-                      ? "page-tab active"
-                      : "page-tab"
-                  }
-                  onClick={() => {
-                    setActivePageId(page.id);
-                    setSelectedIds([]);
-                    setPageSelected(true);
-                  }}
-                >
-                  {page.name}
-                </button>
-              ))}
-
-              <button
-                type="button"
-                className="page-add"
-                onClick={addPage}
-              >
-                +
-              </button>
-            </div>
-
-            <div className="top-actions">
-              <button
-                type="button"
-                onClick={() =>
-                  setZoom(
-                    Math.max(50, zoom - 10)
-                  )
-                }
-              >
-                −
-              </button>
-
-              <span>{zoom}%</span>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setZoom(
-                    Math.min(150, zoom + 10)
-                  )
-                }
-              >
-                +
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setPreview(true)
-                }
-              >
-                Preview
-              </button>
-            </div>
-          </header>
-
-          <aside className="left-panel">
-            <div className="panel-title">
-              Components
-            </div>
-
-            <div className="component-group">
-              <div className="group-title">
-                Components
-              </div>
-
-              {(
-                [
-                  "section",
-                  "heading",
-                  "text",
-                  "image",
-                  "button"
-                ] as ComponentType[]
-              ).map((type) => (
-                <div
-                  key={type}
-                  className="palette-item"
-                  draggable
-                  onDragStart={(event) =>
-                    handlePaletteDragStart(
-                      event,
-                      {
-                        kind: "component",
-                        componentType: type
-                      },
-                      type
-                    )
-                  }
-                >
-                  <span>
-                    {type === "section"
-                      ? "Section"
-                      : type[0].toUpperCase() +
-                        type.slice(1)}
-                  </span>
-                  <span>+</span>
-                </div>
-              ))}
-            </div>
-
-            <div className="component-group">
-              <div className="group-title">
-                Sections
-              </div>
-
-              {templates.map((template) => (
-                <div
-                  key={template.id}
-                  className="template-item"
-                  draggable
-                  onDragStart={(event) =>
-                    handlePaletteDragStart(
-                      event,
-                      {
-                        kind: "template",
-                        templateId:
-                          template.id
-                      },
-                      template.name
-                    )
-                  }
-                >
-                  {template.name}
-                </div>
-              ))}
-            </div>
-          </aside>
-        </>
-      )}
-
-      <main
-        className="canvas-area"
-        ref={canvasRef}
-        onPointerDown={startMarquee}
-        onDragOver={handleCanvasDragOver}
-        onDrop={(event) =>
-          handleDrop(event)
-        }
-      >
-        {preview ? (
-          <div
-            className="preview-page"
-            style={{
-              background:
-                String(
-                  activePage.styles
-                    ?.background ??
-                    "#fff"
-                ),
-              paddingTop:
-                activePage.margins.top,
-              paddingRight:
-                activePage.margins.right,
-              paddingBottom:
-                activePage.margins.bottom,
-              paddingLeft:
-                activePage.margins.left
-            }}
-          >
-            {activePage.components.map(
-              (item) => (
-                <div key={item.id}>
-                  {renderNode(item)}
-                </div>
-              )
-            )}
-          </div>
-        ) : (
-          <div
-            className="canvas-scroll"
-            style={{
-              transform: `scale(${zoom / 100})`,
-              transformOrigin:
-                "top center"
-            }}
-          >
-            <div
-              className={
-                pageSelected
-                  ? "page-frame page-selected"
-                  : "page-frame"
-              }
-              style={{
-                background:
-                  String(
-                    activePage.styles
-                      ?.background ??
-                      "#fff"
-                  ),
-                paddingTop:
-                  activePage.margins.top,
-                paddingRight:
-                  activePage.margins.right,
-                paddingBottom:
-                  activePage.margins.bottom,
-                paddingLeft:
-                  activePage.margins.left
-              }}
-            >
-              {activePage.components.length ===
-                0 && (
-                <div className="empty-page">
-                  Drag a component or section here
-                </div>
-              )}
-
-              {activePage.components.map(
-                (item) => (
-                  <EditorNode
-                    key={item.id}
-                    nodeItem={item}
-                    selectedIds={selectedIds}
-                    dropTarget={dropTarget}
-                    onSelect={select}
-                    onDragStart={
-                      handleNodeDragStart
-                    }
-                    onDragOver={
-                      handleNodeDragOver
-                    }
-                    onDrop={handleDrop}
-                    onDragEnd={() => {
-                      setDropTarget(null);
-                      setDragLabel(null);
-                    }}
-                    onResizeStart={
-                      startResize
-                    }
-                    onDelete={deleteNode}
-                  />
-                )
-              )}
-            </div>
-          </div>
-        )}
-
-        {marquee && (
-          <div
-            className="marquee"
-            style={{
-              left: Math.min(
-                marquee.startX,
-                marquee.currentX
-              ),
-              top: Math.min(
-                marquee.startY,
-                marquee.currentY
-              ),
-              width: Math.abs(
-                marquee.currentX -
-                  marquee.startX
-              ),
-              height: Math.abs(
-                marquee.currentY -
-                  marquee.startY
-              )
-            }}
-          />
-        )}
-
-        {dragLabel && (
-          <div
-            className="drag-ghost"
-            style={{
-              left: dragPoint.x + 14,
-              top: dragPoint.y + 14
-            }}
-          >
-            {dragLabel}
-          </div>
-        )}
-      </main>
-
-      {!preview && (
-        <aside className="right-panel">
-          <div className="inspector-header">
-            Inspector
-          </div>
-
-          {pageSelected || !selectedNodes.length ? (
-            <div className="inspector">
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Page
-                </div>
-
-                <label>
-                  Page name
-                  <input
-                    value={activePage.name}
-                    onChange={(event) =>
-                      updatePage((page) => ({
-                        ...page,
-                        name: event.target.value
-                      }))
-                    }
-                  />
-                </label>
-
-                <label>
-                  Background
-                  <input
-                    type="text"
-                    value={String(
-                      activePage.styles
-                        ?.background ??
-                        "#ffffff"
-                    )}
-                    onChange={(event) =>
-                      updatePageStyle(
-                        "background",
-                        event.target.value
-                      )
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Page margins
-                </div>
-
-                {(
-                  [
-                    "top",
-                    "right",
-                    "bottom",
-                    "left"
-                  ] as const
-                ).map((key) => (
-                  <label key={key}>
-                    {key}
-                    <input
-                      type="number"
-                      value={
-                        activePage.margins[key]
-                      }
-                      onChange={(event) =>
-                        updatePageMargin(
-                          key,
-                          Number(
-                            event.target.value
-                          )
-                        )
-                      }
-                    />
-                  </label>
-                ))}
-              </div>
-            </div>
-          ) : selectedNodes.length > 1 ? (
-            <div className="inspector">
-              <div className="multi-selection">
-                {selectedNodes.length} selected
-              </div>
-
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Alignment
-                </div>
-
-                <div className="alignment-grid">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setNodeStyle(
-                        "alignSelf",
-                        "flex-start"
-                      )
-                    }
-                  >
-                    Left
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setNodeStyle(
-                        "alignSelf",
-                        "center"
-                      )
-                    }
-                  >
-                    Center
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setNodeStyle(
-                        "alignSelf",
-                        "flex-end"
-                      )
-                    }
-                  >
-                    Right
-                  </button>
-                </div>
-              </div>
-
-              {commonFontSize && (
-                <div className="inspector-section">
-                  <div className="inspector-title">
-                    Common text
-                  </div>
-
-                  <label>
-                    Font size
-                    <input
-                      type="number"
-                      value={commonFontSize}
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "fontSize",
-                          Number(
-                            event.target.value
-                          )
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              <div className="inspector-section">
-                <button
-                  type="button"
-                  className="full-button"
-                  onClick={groupSelected}
-                >
-                  Group into section
-                </button>
-              </div>
-            </div>
-          ) : selectedNode ? (
-            <div className="inspector">
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  {selectedNode.type}
-                </div>
-
-                <div className="readonly-type">
-                  Type:{" "}
-                  <strong>
-                    {selectedNode.type}
-                  </strong>
-                </div>
-              </div>
-
-              {selectedNode.type ===
-                "section" && (
-                <>
-                  <div className="inspector-section">
-                    <div className="inspector-title">
-                      Alignment
-                    </div>
-
-                    <div className="alignment-group">
-                      <div>
-                        <span>Horizontal</span>
-                        <div className="alignment-grid">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNodeStyle(
-                                "alignItems",
-                                "flex-start"
-                              )
-                            }
-                          >
-                            Left
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNodeStyle(
-                                "alignItems",
-                                "center"
-                              )
-                            }
-                          >
-                            Center
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNodeStyle(
-                                "alignItems",
-                                "flex-end"
-                              )
-                            }
-                          >
-                            Right
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <span>Vertical</span>
-                        <div className="alignment-grid">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNodeStyle(
-                                "justifyContent",
-                                "flex-start"
-                              )
-                            }
-                          >
-                            Top
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNodeStyle(
-                                "justifyContent",
-                                "center"
-                              )
-                            }
-                          >
-                            Center
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setNodeStyle(
-                                "justifyContent",
-                                "flex-end"
-                              )
-                            }
-                          >
-                            Bottom
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="inspector-section">
-                    <div className="inspector-title">
-                      Padding
-                    </div>
-
-                    {(
-                      [
-                        "paddingTop",
-                        "paddingRight",
-                        "paddingBottom",
-                        "paddingLeft"
-                      ] as const
-                    ).map((key) => (
-                      <label key={key}>
-                        {key
-                          .replace(
-                            "padding",
-                            ""
-                          )}
-                        <input
-                          type="number"
-                          value={parseNumber(
-                            getStyleValue(
-                              selectedNode,
-                              key
-                            ),
-                            key ===
-                              "paddingTop" ||
-                            key ===
-                              "paddingBottom"
-                              ? DEFAULT_SECTION_PADDING
-                              : 40
-                          )}
-                          onChange={(event) =>
-                            setNodeStyle(
-                              key,
-                              Number(
-                                event.target.value
-                              )
-                            )
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-
-                  <div className="inspector-section">
-                    <div className="inspector-title">
-                      Appearance
-                    </div>
-
-                    <label>
-                      Background
-                      <input
-                        type="text"
-                        value={String(
-                          getStyleValue(
-                            selectedNode,
-                            "background"
-                          ) ?? "#ffffff"
-                        )}
-                        onChange={(event) =>
-                          setNodeStyle(
-                            "background",
-                            event.target.value
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label>
-                      Border radius
-                      <input
-                        type="number"
-                        value={parseNumber(
-                          getStyleValue(
-                            selectedNode,
-                            "borderRadius"
-                          ),
-                          0
-                        )}
-                        onChange={(event) =>
-                          setNodeStyle(
-                            "borderRadius",
-                            Number(
-                              event.target.value
-                            )
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
-
-                  <div className="inspector-section">
-                    <button
-                      type="button"
-                      className="full-button"
-                      onClick={ungroupSelected}
-                      disabled={
-                        !selectedNode.children?.length
-                      }
-                    >
-                      Ungroup section
-                    </button>
-                  </div>
-                </>
-              )}
-
-              {selectedNode.type ===
-                "heading" && (
-                <>
-                  <div className="inspector-section">
-                    <label>
-                      Text
-                      <textarea
-                        value={String(
-                          selectedNode.props
-                            .text ?? ""
-                        )}
-                        onChange={(event) =>
-                          setNodeProp(
-                            "text",
-                            event.target.value
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label>
-                      Font size
-                      <input
-                        type="number"
-                        value={parseNumber(
-                          getStyleValue(
-                            selectedNode,
-                            "fontSize"
-                          ),
-                          32
-                        )}
-                        onChange={(event) =>
-                          setNodeStyle(
-                            "fontSize",
-                            Number(
-                              event.target.value
-                            )
-                          )
-                        }
-                      />
-                    </label>
-
-                    <label>
-                      Weight
-                      <select
-                        value={String(
-                          getStyleValue(
-                            selectedNode,
-                            "fontWeight"
-                          ) ?? "700"
-                        )}
-                        onChange={(event) =>
-                          setNodeStyle(
-                            "fontWeight",
-                            event.target.value
-                          )
-                        }
-                      >
-                        <option value="400">
-                          400
-                        </option>
-                        <option value="500">
-                          500
-                        </option>
-                        <option value="600">
-                          600
-                        </option>
-                        <option value="700">
-                          700
-                        </option>
-                      </select>
-                    </label>
-                  </div>
-                </>
-              )}
-
-              {selectedNode.type ===
-                "text" && (
-                <div className="inspector-section">
-                  <label>
-                    Text
-                    <textarea
-                      value={String(
-                        selectedNode.props
-                          .text ?? ""
-                      )}
-                      onChange={(event) =>
-                        setNodeProp(
-                          "text",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Font size
-                    <input
-                      type="number"
-                      value={parseNumber(
-                        getStyleValue(
-                          selectedNode,
-                          "fontSize"
-                        ),
-                        16
-                      )}
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "fontSize",
-                          Number(
-                            event.target.value
-                          )
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              {selectedNode.type ===
-                "button" && (
-                <div className="inspector-section">
-                  <label>
-                    Text
-                    <input
-                      value={String(
-                        selectedNode.props
-                          .text ?? ""
-                      )}
-                      onChange={(event) =>
-                        setNodeProp(
-                          "text",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Font size
-                    <input
-                      type="number"
-                      value={parseNumber(
-                        getStyleValue(
-                          selectedNode,
-                          "fontSize"
-                        ),
-                        16
-                      )}
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "fontSize",
-                          Number(
-                            event.target.value
-                          )
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Background
-                    <input
-                      type="text"
-                      value={String(
-                        getStyleValue(
-                          selectedNode,
-                          "background"
-                        ) ?? "#111111"
-                      )}
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "background",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              {selectedNode.type ===
-                "image" && (
-                <div className="inspector-section">
-                  <label>
-                    Image URL
-                    <input
-                      value={String(
-                        selectedNode.props
-                          .src ?? ""
-                      )}
-                      onChange={(event) =>
-                        setNodeProp(
-                          "src",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Alt text
-                    <input
-                      value={String(
-                        selectedNode.props
-                          .alt ?? ""
-                      )}
-                      onChange={(event) =>
-                        setNodeProp(
-                          "alt",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              {selectedNode.type !==
-                "section" && (
-                <div className="inspector-section">
-                  <div className="inspector-title">
-                    Link
-                  </div>
-
-                  <label>
-                    Page
-                    <select
-                      value={String(
-                        selectedNode.props
-                          .linkTo ?? ""
-                      )}
-                      onChange={(event) =>
-                        setNodeProp(
-                          "linkTo",
-                          event.target.value
-                        )
-                      }
-                    >
-                      <option value="">
-                        No link
-                      </option>
-
-                      {site.pages.map(
-                        (page) => (
-                          <option
-                            key={page.id}
-                            value={
-                              page.slug
-                            }
-                          >
-                            {page.name}
-                          </option>
-                        )
-                      )}
-                    </select>
-                  </label>
-                </div>
-              )}
-
-              <div className="inspector-section">
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={() =>
-                    deleteNode(
-                      selectedNode.id
-                    )
-                  }
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </aside>
-      )}
-
-      {preview && (
-        <button
-          type="button"
-          className="exit-preview"
-          onClick={() => setPreview(false)}
-        >
-          Exit preview
-        </button>
-      )}
-    </div>
-  );
+.zoom {
+  width: 44px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.workspace {
+  min-height: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr) 290px;
+}
+
+.left-panel,
+.inspector {
+  min-width: 0;
+  background: #ffffff;
+  border-right: 1px solid #e2e5e9;
+  overflow: hidden;
+}
+
+.inspector {
+  border-right: 0;
+  border-left: 1px solid #e2e5e9;
+}
+
+.panel-tabs,
+.inspector-tabs {
+  height: 46px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.panel-tabs button,
+.inspector-tabs button {
+  font-size: 12px;
+  color: #6b7280;
+  border-bottom: 2px solid transparent;
+}
+
+.panel-tabs button.active,
+.inspector-tabs button.active {
+  color: #111827;
+  border-bottom-color: #2563eb;
+}
+
+.panel-scroll,
+.inspector-scroll {
+  height: calc(100% - 46px);
+  overflow: auto;
+  padding: 16px;
+}
+
+.panel-scroll h3,
+.inspector-section h4 {
+  margin: 0 0 12px;
+}
+
+.panel-scroll h3 {
+  font-size: 13px;
+}
+
+.element-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.element-grid button {
+  min-height: 58px;
+  border: 1px solid #e3e6eb;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.element-grid button:hover {
+  border-color: #2563eb;
+  background: #f7faff;
+}
+
+.template-list {
+  display: grid;
+  gap: 8px;
+}
+
+.template-list button,
+.page-item,
+.layer-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid #e3e6eb;
+  border-radius: 7px;
+  padding: 10px;
+  background: white;
+}
+
+.page-item,
+.layer-item {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 6px;
+}
+
+.page-item small,
+.layer-item small {
+  color: #8a919c;
+  margin-top: 3px;
+}
+
+.page-item.active,
+.layer-item.active {
+  border-color: #2563eb;
+  background: #f7faff;
+}
+
+.panel-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.canvas-area {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(#e8ebef 1px, transparent 1px),
+    linear-gradient(90deg, #e8ebef 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.canvas-scroll {
+  position: absolute;
+  inset: 28px 0 44px 28px;
+  overflow: auto;
+  padding: 60px;
+}
+
+.canvas-stage {
+  position: relative;
+  margin: 0 auto;
+  min-height: 1000px;
+  background: white;
+  box-shadow: 0 10px 40px #0001;
+}
+
+.canvas-stage > * {
+  position: relative;
+}
+
+.empty-canvas {
+  padding: 100px 40px;
+  text-align: center;
+  color: #8b929c;
+}
+
+.ruler-horizontal {
+  position: absolute;
+  left: 28px;
+  top: 0;
+  right: 0;
+  height: 28px;
+  background: #ffffff;
+  border-bottom: 1px solid #dfe3e8;
+  display: flex;
+  overflow: hidden;
+  z-index: 5;
+}
+
+.ruler-horizontal span {
+  width: 100px;
+  flex: 0 0 100px;
+  padding-top: 7px;
+  padding-left: 3px;
+  font-size: 9px;
+  color: #8a919c;
+  border-left: 1px solid #dfe3e8;
+}
+
+.ruler-vertical {
+  position: absolute;
+  left: 0;
+  top: 28px;
+  bottom: 44px;
+  width: 28px;
+  background: #ffffff;
+  border-right: 1px solid #dfe3e8;
+  z-index: 5;
+  overflow: hidden;
+}
+
+.ruler-vertical span {
+  display: block;
+  height: 100px;
+  padding-left: 4px;
+  padding-top: 3px;
+  font-size: 9px;
+  color: #8a919c;
+  border-top: 1px solid #dfe3e8;
+}
+
+.snap-guide {
+  position: absolute;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.snap-guide.horizontal {
+  top: 50%;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed #4c8dff;
+}
+
+.snap-guide.vertical {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px dashed #4c8dff;
+}
+
+.marquee {
+  position: fixed;
+  z-index: 200;
+  border: 1px solid #2563eb;
+  background: #2563eb18;
+  pointer-events: none;
+}
+
+.page-tabs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  background: #ffffff;
+  border-top: 1px solid #e2e5e9;
+  z-index: 10;
+}
+
+.page-tabs button {
+  height: 34px;
+  padding: 0 15px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.page-tabs button.active {
+  background: #eef4ff;
+  color: #2563eb;
+}
+
+.selection-title {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e5e7eb;
+  margin-bottom: 14px;
+}
+
+.selection-title small {
+  color: #858c96;
+  font-size: 11px;
+}
+
+.inspector-section {
+  padding: 14px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.inspector-section h4 {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.inspector-section label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: #606873;
+}
+
+.inspector-section input,
+.inspector-section textarea,
+.inspector-section select {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  min-height: 34px;
+  border: 1px solid #d9dde3;
+  border-radius: 6px;
+  padding: 7px 9px;
+  background: white;
+  color: #202124;
+}
+
+.inspector-section textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.inspector-section button {
+  width: 100%;
+  margin-bottom: 7px;
+  min-height: 34px;
+  border: 1px solid #d9dde3;
+  border-radius: 6px;
+  background: white;
+}
+
+.inspector-section button:hover {
+  background: #f5f7fa;
+}
+
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  width: auto !important;
+  min-height: auto !important;
+  margin: 0 !important;
 }
