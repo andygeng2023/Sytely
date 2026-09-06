@@ -2,46 +2,118 @@
 
 import { useEffect, useState } from "react";
 import { SytelyRenderer } from "@sytely/renderer";
-import type { Site } from "@sytely/types";
+import type {
+  Site,
+  SiteWorkspace
+} from "@sytely/types";
 
 export default function PreviewPage() {
-  const [site, setSite] = useState<Site | null>(null);
+  const [site, setSite] =
+    useState<Site | null>(null);
+  const [error, setError] =
+    useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("sytely-site");
+    try {
+      const raw =
+        window.localStorage.getItem(
+          "sytely-workspace"
+        );
 
-    if (saved) {
-      setSite(JSON.parse(saved));
+      if (!raw) return;
+
+      const workspace =
+        JSON.parse(raw) as SiteWorkspace;
+
+      const params =
+        new URLSearchParams(
+          window.location.search
+        );
+
+      const siteId =
+        params.get("site") ??
+        workspace.activeSiteId;
+
+      const site =
+        workspace.sites.find(
+          (item) =>
+            item.id === siteId
+        ) ?? workspace.sites[0];
+
+      if (site) setSite(site);
+    } catch {
+      setError(true);
     }
   }, []);
 
-  if (!site) {
-    return <div>Loading preview...</div>;
+  if (error) {
+    return (
+      <main className="preview-error">
+        Could not load this preview.
+      </main>
+    );
   }
 
-  const params = new URLSearchParams(
-    window.location.search
-  );
+  if (!site) {
+    return (
+      <main className="preview-error">
+        No saved website yet.{" "}
+        <a href="/editor">
+          Open the editor
+        </a>
+        .
+      </main>
+    );
+  }
 
-  const requested =
-    params.get("page") || "/";
+  const params =
+    new URLSearchParams(
+      window.location.search
+    );
+
+  const slug =
+    params.get("page") ?? "/";
 
   const page =
     site.pages.find(
       (item) =>
-        item.settings.slug === requested
-    ) ||
-    site.pages[0];
+        item.slug === slug
+    ) ?? site.pages[0];
+
+  if (!page) return null;
 
   return (
     <main
+      className={`preview-site theme-${site.theme}`}
+      data-sytely-theme={
+        site.theme
+      }
       style={{
-        fontFamily: site.theme.fontFamily
+        background: String(
+          page.styles?.background ??
+            (site.theme === "dark"
+              ? "#111113"
+              : "#fff")
+        ),
+        color:
+          site.theme === "dark"
+            ? "#f7f7f8"
+            : "#171719",
+        paddingTop:
+          page.margins.top,
+        paddingRight:
+          page.margins.right,
+        paddingBottom:
+          page.margins.bottom + 96,
+        paddingLeft:
+          page.margins.left,
+        minHeight: "100vh",
+        boxSizing: "border-box"
       }}
     >
       <SytelyRenderer
         nodes={page.components}
-        breakpoint="desktop"
+        theme={site.theme}
       />
     </main>
   );

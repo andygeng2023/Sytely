@@ -1,1338 +1,2241 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SytelyRenderer } from "@sytely/renderer";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type PointerEvent as ReactPointerEvent
+} from "react";
+import { renderNode } from "@sytely/renderer";
 import type {
-  Breakpoint,
-  NodeStyle,
-  NodeType,
+  ComponentNode,
+  ComponentType,
   Site,
-  SiteNode,
-  SitePage
+  SitePage,
+  SiteTheme,
+  SiteWorkspace
 } from "@sytely/types";
 import "./editor.css";
 
-type History = Site[];
+type Tool =
+  | "components"
+  | "templates"
+  | "pages"
+  | "layers";
+
+type InspectorTab =
+  | "design"
+  | "layout"
+  | "position";
+
+type Device =
+  | "desktop"
+  | "tablet"
+  | "mobile";
+
+type DropPosition =
+  | "before"
+  | "after"
+  | "inside";
+
+type DragPayload =
+  | {
+      kind: "component";
+      componentType: ComponentType;
+    }
+  | {
+      kind: "template";
+      templateId: string;
+    }
+  | {
+      kind: "node";
+      nodeIds: string[];
+    };
+
+interface DropTarget {
+  id: string | null;
+  position: DropPosition;
+}
+
+const SECTION_PAD = 56;
 
 const uid = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  typeof crypto !== "undefined" &&
+  crypto.randomUUID
+    ? crypto.randomUUID()
+    : `node-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2)}`;
 
-const baseSection = (
+function makeNode(
   id: string,
-  content: SiteNode[] = []
-): SiteNode => ({
-  id,
-  type: "section",
-  name: "Section",
-  style: {
-    display: "flex",
-    flexDirection: "column",
-    width: "100%",
-    paddingTop: "72px",
-    paddingRight: "48px",
-    paddingBottom: "72px",
-    paddingLeft: "48px",
-    gap: "24px",
-    background: "#ffffff",
-    position: "relative"
-  },
-  children: content
-});
+  type: ComponentType,
+  props: Record<string, unknown> = {},
+  styles: Record<string, unknown> = {},
+  children?: ComponentNode[]
+): ComponentNode {
+  return {
+    id,
+    type,
+    props,
+    styles,
+    ...(children ? { children } : {})
+  };
+}
 
-const templates: Record<string, SiteNode[]> = {
-  Blank: [
-    baseSection("blank-section", [
-      {
-        id: "blank-heading",
-        type: "heading",
-        content: "Build something great",
-        style: {
-          fontSize: "56px",
-          fontWeight: "700",
-          textAlign: "center",
-          width: "100%"
-        }
-      },
-      {
-        id: "blank-text",
-        type: "paragraph",
-        content: "Start creating your website.",
-        style: {
-          fontSize: "20px",
-          textAlign: "center",
-          width: "100%"
-        }
-      }
-    ])
-  ],
+function makeSection(
+  id: string,
+  children: ComponentNode[] = [],
+  styles: Record<string, unknown> = {}
+): ComponentNode {
+  return makeNode(
+    id,
+    "section",
+    {},
+    {
+      paddingTop: SECTION_PAD,
+      paddingRight: 40,
+      paddingBottom: SECTION_PAD,
+      paddingLeft: 40,
+      background: "#fff",
+      ...styles
+    },
+    children
+  );
+}
 
-  Business: [
-    baseSection("business-hero", [
-      {
-        id: "business-logo",
-        type: "logo",
-        content: "YOUR BRAND",
-        style: {
-          fontSize: "22px",
-          fontWeight: "700"
-        }
-      },
-      {
-        id: "business-heading",
-        type: "heading",
-        content: "A better way to grow your business",
-        style: {
-          fontSize: "64px",
-          fontWeight: "700",
-          maxWidth: "900px"
-        } as NodeStyle
-      },
-      {
-        id: "business-text",
-        type: "paragraph",
-        content:
-          "A polished website built around your brand, your customers and your goals.",
-        style: {
-          fontSize: "20px",
-          maxWidth: "700px"
-        } as NodeStyle
-      },
-      {
-        id: "business-button",
-        type: "button",
-        content: "Get started",
-        href: "#contact",
-        style: {
-          width: "180px",
-          height: "52px",
-          background: "#111827",
-          color: "#ffffff",
-          borderRadius: "8px",
-          textAlign: "center",
-          paddingTop: "14px",
-          paddingBottom: "14px"
-        }
-      }
-    ])
-  ],
-
-  Portfolio: [
-    baseSection("portfolio", [
-      {
-        id: "portfolio-title",
-        type: "heading",
-        content: "Selected work",
-        style: {
-          fontSize: "54px",
-          fontWeight: "700"
-        }
-      },
-      {
-        id: "portfolio-gallery",
-        type: "gallery",
-        style: {
-          width: "100%",
-          gap: "16px"
-        }
-      }
-    ])
-  ],
-
-  SaaS: [
-    baseSection("saas", [
-      {
-        id: "saas-heading",
-        type: "heading",
-        content: "The modern workspace for your team",
-        style: {
-          fontSize: "58px",
-          fontWeight: "700",
-          textAlign: "center",
-          width: "100%"
-        }
-      },
-      {
-        id: "saas-copy",
-        type: "paragraph",
-        content:
-          "Plan, build and collaborate from one simple platform.",
-        style: {
-          fontSize: "20px",
-          textAlign: "center",
-          width: "100%"
-        }
-      },
-      {
-        id: "saas-button",
-        type: "button",
-        content: "Start for free",
-        style: {
-          width: "180px",
-          height: "52px",
-          background: "#2563eb",
-          color: "#ffffff",
-          borderRadius: "8px",
-          textAlign: "center",
-          paddingTop: "14px",
-          paddingBottom: "14px",
-          alignSelf: "center"
-        }
-      }
-    ])
-  ],
-
-  Restaurant: [
-    baseSection("restaurant", [
-      {
-        id: "restaurant-heading",
-        type: "heading",
-        content: "Welcome to our table",
-        style: {
-          fontSize: "60px",
-          fontWeight: "700",
-          textAlign: "center"
-        }
-      },
-      {
-        id: "restaurant-copy",
-        type: "paragraph",
-        content:
-          "Fresh ingredients, thoughtful cooking and a warm atmosphere.",
-        style: {
-          fontSize: "20px",
-          textAlign: "center"
-        }
-      },
-      {
-        id: "restaurant-button",
-        type: "button",
-        content: "View menu",
-        href: "/menu",
-        style: {
-          width: "160px",
-          height: "50px",
-          background: "#111111",
-          color: "#ffffff",
-          borderRadius: "6px",
-          alignSelf: "center",
-          textAlign: "center",
-          paddingTop: "13px"
-        }
-      }
-    ])
-  ]
-};
-
-const initialSite: Site = {
-  id: "site",
-  name: "My Site",
-  theme: {
-    primaryColor: "#2563eb",
-    fontFamily: "Inter, Arial, sans-serif"
-  },
+const starterSite = (): Site => ({
+  id: uid(),
+  name: "Untitled Website",
+  version: 4,
+  theme: "system",
   pages: [
     {
-      id: "home",
+      id: uid(),
       name: "Home",
-      settings: {
-        title: "Home",
-        slug: "/",
-        description: "My Sytely website"
+      slug: "/",
+      margins: {
+        top: 0,
+        right: 0,
+        bottom: 96,
+        left: 0
       },
-      components: templates.Business
-    },
-    {
-      id: "about",
-      name: "About",
-      settings: {
-        title: "About",
-        slug: "/about",
-        description: "About us"
+      styles: {
+        background: "#fff"
       },
       components: [
-        baseSection("about-section", [
-          {
-            id: "about-heading",
-            type: "heading",
-            content: "About us",
-            style: {
-              fontSize: "56px",
-              fontWeight: "700"
+        makeSection(uid(), [
+          makeNode(
+            uid(),
+            "heading",
+            {
+              text: "Build something people remember"
+            },
+            {
+              fontSize: 52,
+              fontWeight: 750,
+              textAlign: "center",
+              alignSelf: "center"
             }
-          },
-          {
-            id: "about-text",
-            type: "paragraph",
-            content: "Tell visitors about your company or project.",
-            style: {
-              fontSize: "20px",
-              maxWidth: "720px"
-            } as NodeStyle
-          }
-        ])
+          ),
+          makeNode(
+            uid(),
+            "text",
+            {
+              text: "Create polished websites visually without writing code."
+            },
+            {
+              fontSize: 18,
+              textAlign: "center",
+              maxWidth: 680,
+              alignSelf: "center"
+            }
+          ),
+          makeNode(
+            uid(),
+            "button",
+            {
+              text: "Get started"
+            },
+            {
+              background: "#111",
+              color: "#fff",
+              alignSelf: "center"
+            }
+          )
+        ], {
+          alignItems: "center"
+        })
       ]
     }
   ]
-};
+});
 
-function clone<T>(value: T): T {
-  return structuredClone(value);
+const componentCatalog: {
+  type: ComponentType;
+  label: string;
+  category: string;
+  description: string;
+}[] = [
+  ["section", "Section", "Layout", "Page section"],
+  ["heading", "Heading", "Basic", "Large text"],
+  ["text", "Text", "Basic", "Paragraph"],
+  ["button", "Button", "Basic", "Call to action"],
+  ["image", "Image", "Media", "Image"],
+  ["video", "Video", "Media", "Video"],
+  ["gallery", "Gallery", "Media", "Image grid"],
+  ["divider", "Divider", "Basic", "Separator"],
+  ["icon", "Icon", "Basic", "Icon block"],
+  ["logo", "Logo", "Navigation", "Brand"],
+  ["menu", "Menu", "Navigation", "Navigation"],
+  ["social", "Social links", "Navigation", "Social links"],
+  ["form", "Form", "Forms", "Contact form"],
+  ["card", "Card", "Layout", "Content card"],
+  ["features", "Features", "Sections", "Feature grid"],
+  ["pricing", "Pricing", "Sections", "Pricing"],
+  ["testimonial", "Testimonial", "Sections", "Quote"],
+  ["faq", "FAQ", "Sections", "Questions"],
+  ["contact", "Contact", "Sections", "Contact"],
+  ["footer", "Footer", "Sections", "Footer"]
+].map(
+  ([type, label, category, description]) => ({
+    type: type as ComponentType,
+    label,
+    category,
+    description
+  })
+);
+
+const templates = [
+  {
+    id: "hero",
+    name: "Hero",
+    category: "Landing",
+    node: makeSection("hero-template", [
+      makeNode(
+        "hero-heading",
+        "heading",
+        {
+          text: "Build something people remember"
+        },
+        {
+          fontSize: 52,
+          fontWeight: 750,
+          textAlign: "center"
+        }
+      ),
+      makeNode(
+        "hero-text",
+        "text",
+        {
+          text: "A polished starting point for your next website."
+        },
+        {
+          fontSize: 18,
+          textAlign: "center",
+          maxWidth: 680
+        }
+      ),
+      makeNode(
+        "hero-button",
+        "button",
+        {
+          text: "Get started"
+        },
+        {
+          background: "#111",
+          color: "#fff"
+        }
+      )
+    ], {
+      alignItems: "center",
+      gap: 20
+    })
+  },
+  {
+    id: "features",
+    name: "Features",
+    category: "SaaS",
+    node: makeSection("features-template", [
+      makeNode(
+        "features-heading",
+        "heading",
+        {
+          text: "Everything you need"
+        },
+        {
+          fontSize: 40,
+          fontWeight: 750,
+          textAlign: "center"
+        }
+      ),
+      makeNode("features-grid", "features")
+    ], {
+      alignItems: "center"
+    })
+  },
+  {
+    id: "pricing",
+    name: "Pricing",
+    category: "SaaS",
+    node: makeSection("pricing-template", [
+      makeNode(
+        "pricing-heading",
+        "heading",
+        {
+          text: "Simple pricing"
+        },
+        {
+          fontSize: 40,
+          fontWeight: 750,
+          textAlign: "center"
+        }
+      ),
+      makeNode("pricing-grid", "pricing")
+    ], {
+      alignItems: "center"
+    })
+  },
+  {
+    id: "portfolio",
+    name: "Portfolio",
+    category: "Portfolio",
+    node: makeSection("portfolio-template", [
+      makeNode(
+        "portfolio-heading",
+        "heading",
+        {
+          text: "Selected work"
+        },
+        {
+          fontSize: 42,
+          fontWeight: 750
+        }
+      ),
+      makeNode("portfolio-gallery", "gallery")
+    ])
+  },
+  {
+    id: "contact",
+    name: "Contact",
+    category: "Business",
+    node: makeSection("contact-template", [
+      makeNode(
+        "contact-heading",
+        "heading",
+        {
+          text: "Let's talk"
+        },
+        {
+          fontSize: 40,
+          fontWeight: 750
+        }
+      ),
+      makeNode("contact-details", "contact"),
+      makeNode("contact-form", "form")
+    ])
+  }
+];
+
+function cloneIds(
+  node: ComponentNode
+): ComponentNode {
+  return {
+    ...node,
+    id: uid(),
+    props: { ...node.props },
+    styles: { ...(node.styles ?? {}) },
+    children: node.children?.map(cloneIds)
+  };
 }
 
-function findNode(nodes: SiteNode[], id: string): SiteNode | null {
+function findNode(
+  nodes: ComponentNode[],
+  id: string
+): ComponentNode | null {
   for (const node of nodes) {
     if (node.id === id) return node;
-    const found = findNode(node.children ?? [], id);
-    if (found) return found;
+
+    const result = findNode(
+      node.children ?? [],
+      id
+    );
+
+    if (result) return result;
   }
+
   return null;
 }
 
-function walkNodes(
-  nodes: SiteNode[],
-  callback: (node: SiteNode) => void
-) {
+function findParent(
+  nodes: ComponentNode[],
+  id: string,
+  parent: ComponentNode | null = null
+): ComponentNode | null {
   for (const node of nodes) {
-    callback(node);
-    walkNodes(node.children ?? [], callback);
+    if (node.id === id) return parent;
+
+    const result = findParent(
+      node.children ?? [],
+      id,
+      node
+    );
+
+    if (result) return result;
+  }
+
+  return null;
+}
+
+function collect(
+  nodes: ComponentNode[],
+  result: ComponentNode[] = []
+): ComponentNode[] {
+  nodes.forEach((node) => {
+    result.push(node);
+    collect(node.children ?? [], result);
+  });
+
+  return result;
+}
+
+function contains(
+  node: ComponentNode,
+  id: string
+): boolean {
+  return (
+    node.id === id ||
+    (node.children ?? []).some((child) =>
+      contains(child, id)
+    )
+  );
+}
+
+function updateTree(
+  nodes: ComponentNode[],
+  id: string,
+  updater: (node: ComponentNode) => ComponentNode
+): ComponentNode[] {
+  return nodes.map((node) =>
+    node.id === id
+      ? updater(node)
+      : {
+          ...node,
+          children: node.children
+            ? updateTree(
+                node.children,
+                id,
+                updater
+              )
+            : undefined
+        }
+  );
+}
+
+function removeTree(
+  nodes: ComponentNode[],
+  id: string
+): ComponentNode[] {
+  return nodes.flatMap((node) => {
+    if (node.id === id) return [];
+
+    return [
+      {
+        ...node,
+        children: node.children
+          ? removeTree(node.children, id)
+          : undefined
+      }
+    ];
+  });
+}
+
+function insertTree(
+  nodes: ComponentNode[],
+  targetId: string,
+  item: ComponentNode,
+  position: DropPosition
+): ComponentNode[] {
+  return nodes.flatMap((node) => {
+    if (node.id === targetId) {
+      if (position === "before") {
+        return [item, node];
+      }
+
+      if (position === "after") {
+        return [node, item];
+      }
+
+      return [
+        {
+          ...node,
+          children: [
+            ...(node.children ?? []),
+            item
+          ]
+        }
+      ];
+    }
+
+    return [
+      {
+        ...node,
+        children: node.children
+          ? insertTree(
+              node.children,
+              targetId,
+              item,
+              position
+            )
+          : undefined
+      }
+    ];
+  });
+}
+
+function makeComponent(
+  type: ComponentType
+): ComponentNode {
+  switch (type) {
+    case "section":
+      return makeSection(uid());
+
+    case "heading":
+      return makeNode(
+        uid(),
+        type,
+        { text: "Heading" },
+        {
+          fontSize: 32,
+          fontWeight: 700
+        }
+      );
+
+    case "text":
+      return makeNode(
+        uid(),
+        type,
+        { text: "Add your text here." }
+      );
+
+    case "button":
+      return makeNode(
+        uid(),
+        type,
+        { text: "Button" },
+        {
+          background: "#111",
+          color: "#fff"
+        }
+      );
+
+    case "image":
+      return makeNode(
+        uid(),
+        type,
+        {
+          src: "",
+          alt: "Image"
+        },
+        {
+          maxWidth: 520
+        }
+      );
+
+    case "icon":
+      return makeNode(
+        uid(),
+        type,
+        { symbol: "✦" }
+      );
+
+    case "logo":
+      return makeNode(
+        uid(),
+        type,
+        { text: "Sytely" }
+      );
+
+    case "testimonial":
+      return makeNode(
+        uid(),
+        type,
+        {
+          text: "A thoughtful testimonial from a happy customer."
+        }
+      );
+
+    default:
+      return makeNode(uid(), type);
   }
 }
 
-function contains(nodes: SiteNode[], ancestorId: string, targetId: string) {
-  const ancestor = findNode(nodes, ancestorId);
-  if (!ancestor) return false;
-  return !!findNode(ancestor.children ?? [], targetId);
-}
+function EditorNode({
+  node,
+  selectedIds,
+  dropTarget,
+  onSelect,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onDelete,
+  onResize
+}: {
+  node: ComponentNode;
+  selectedIds: string[];
+  dropTarget: DropTarget | null;
+  onSelect: (
+    id: string,
+    additive: boolean
+  ) => void;
+  onDragStart: (
+    event: DragEvent,
+    id: string
+  ) => void;
+  onDragOver: (
+    event: DragEvent,
+    node: ComponentNode
+  ) => void;
+  onDrop: (
+    event: DragEvent,
+    node: ComponentNode
+  ) => void;
+  onDragEnd: () => void;
+  onDelete: (id: string) => void;
+  onResize: (
+    event: ReactPointerEvent<HTMLDivElement>,
+    id: string
+  ) => void;
+}) {
+  const selected = selectedIds.includes(
+    node.id
+  );
 
-function updateNode(
-  nodes: SiteNode[],
-  id: string,
-  updater: (node: SiteNode) => SiteNode
-): SiteNode[] {
-  return nodes.map((node) => {
-    if (node.id === id) return updater(node);
+  const children = node.children ?? [];
 
-    return {
-      ...node,
-      children: node.children
-        ? updateNode(node.children, id, updater)
-        : node.children
-    };
-  });
-}
+  const content =
+    node.type === "section"
+      ? renderNode(node, {
+          children: children.length ? (
+            children.map((child) => (
+              <EditorNode
+                key={child.id}
+                node={child}
+                selectedIds={selectedIds}
+                dropTarget={dropTarget}
+                onSelect={onSelect}
+                onDragStart={onDragStart}
+                onDragOver={onDragOver}
+                onDrop={onDrop}
+                onDragEnd={onDragEnd}
+                onDelete={onDelete}
+                onResize={onResize}
+              />
+            ))
+          ) : (
+            <div className="empty-section">
+              Drop components here
+            </div>
+          )
+        })
+      : renderNode(node, {
+          renderChildren: false
+        });
 
-function removeNodes(
-  nodes: SiteNode[],
-  ids: Set<string>
-): { nodes: SiteNode[]; removed: SiteNode[] } {
-  const removed: SiteNode[] = [];
+  const dropClass =
+    dropTarget?.id === node.id
+      ? `drop-${dropTarget.position}`
+      : "";
 
-  const result = nodes
-    .filter((node) => {
-      if (ids.has(node.id)) {
-        removed.push(node);
-        return false;
-      }
-      return true;
-    })
-    .map((node) => {
-      if (!node.children) return node;
+  return (
+    <div
+      className={[
+        "editor-node",
+        node.type === "section"
+          ? "section-node"
+          : "component-node",
+        selected ? "selected" : "",
+        dropClass
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-editor-node-id={node.id}
+      draggable
+      onDragStart={(event) => {
+        event.stopPropagation();
+        onDragStart(event, node.id);
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDragOver(event, node);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDrop(event, node);
+      }}
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
 
-      const childResult = removeNodes(node.children, ids);
-      removed.push(...childResult.removed);
+        event.stopPropagation();
 
-      return {
-        ...node,
-        children: childResult.nodes
-      };
-    });
+        onSelect(
+          node.id,
+          event.shiftKey ||
+            event.metaKey ||
+            event.ctrlKey
+        );
+      }}
+    >
+      <div className="node-visual">
+        {content}
 
-  return { nodes: result, removed };
-}
+        {node.type === "section" &&
+          selected && (
+            <div className="padding-overlay">
+              <span>
+                Padding
+              </span>
+            </div>
+          )}
+      </div>
 
-function insertInto(
-  nodes: SiteNode[],
-  parentId: string,
-  children: SiteNode[]
-): SiteNode[] {
-  return nodes.map((node) => {
-    if (node.id === parentId) {
-      return {
-        ...node,
-        children: [...(node.children ?? []), ...children]
-      };
-    }
+      {selected && (
+        <>
+          <div className="node-label">
+            {node.type}
+          </div>
 
-    return node.children
-      ? {
-          ...node,
-          children: insertInto(node.children, parentId, children)
-        }
-      : node;
-  });
-}
+          <button
+            className="node-delete"
+            onPointerDown={(event) =>
+              event.stopPropagation()
+            }
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete(node.id);
+            }}
+          >
+            ×
+          </button>
 
-function nodeLabel(node: SiteNode) {
-  return node.name || node.type[0].toUpperCase() + node.type.slice(1);
+          <div
+            className="resize-handle resize-right"
+            onPointerDown={(event) =>
+              onResize(event, node.id)
+            }
+          />
+
+          <div
+            className="resize-handle resize-bottom"
+            onPointerDown={(event) =>
+              onResize(event, node.id)
+            }
+          />
+
+          <div
+            className="resize-handle resize-corner"
+            onPointerDown={(event) =>
+              onResize(event, node.id)
+            }
+          />
+        </>
+      )}
+    </div>
+  );
 }
 
 export default function EditorPage() {
-  const [site, setSite] = useState<Site>(() => clone(initialSite));
-  const [history, setHistory] = useState<History>([]);
-  const [future, setFuture] = useState<History>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [pageId, setPageId] = useState("home");
-  const [breakpoint, setBreakpoint] =
-    useState<Breakpoint>("desktop");
-  const [zoom, setZoom] = useState(100);
-  const [leftTab, setLeftTab] =
-    useState<"add" | "pages" | "layers">("add");
+  const [workspace, setWorkspace] =
+    useState<SiteWorkspace>(() => {
+      const site = starterSite();
+
+      return {
+        version: 1,
+        activeSiteId: site.id,
+        sites: [site]
+      };
+    });
+
+  const [activePageId, setActivePageId] =
+    useState("");
+
+  const [selectedIds, setSelectedIds] =
+    useState<string[]>([]);
+
+  const [pageSelected, setPageSelected] =
+    useState(true);
+
+  const [tool, setTool] =
+    useState<Tool>("components");
+
   const [inspectorTab, setInspectorTab] =
-    useState<"design" | "layout" | "position" | "page">("design");
-  const [marquee, setMarquee] = useState<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>(null);
+    useState<InspectorTab>("design");
 
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const dragStart = useRef<{ x: number; y: number } | null>(null);
-  const clipboard = useRef<SiteNode[]>([]);
+  const [device, setDevice] =
+    useState<Device>("desktop");
 
-  const page = site.pages.find((item) => item.id === pageId)!;
-  const selectedNodes = selectedIds
-    .map((id) => findNode(page.components, id))
-    .filter(Boolean) as SiteNode[];
+  const [dropTarget, setDropTarget] =
+    useState<DropTarget | null>(null);
 
-  const selected = selectedNodes[0] ?? null;
+  const [dragLabel, setDragLabel] =
+    useState<string | null>(null);
 
-  const commit = useCallback(
-    (next: Site) => {
-      setHistory((previous) => [
-        ...previous.slice(-49),
-        clone(site)
-      ]);
-      setFuture([]);
-      setSite(clone(next));
-    },
-    [site]
-  );
+  const [dragPoint, setDragPoint] =
+    useState({ x: 0, y: 0 });
 
-  const mutatePage = useCallback(
-    (fn: (page: SitePage) => SitePage) => {
-      const next = clone(site);
-      const target = next.pages.find((item) => item.id === pageId);
-      if (!target) return;
-      const changed = fn(target);
-      next.pages = next.pages.map((item) =>
-        item.id === pageId ? changed : item
-      );
-      commit(next);
-    },
-    [site, pageId, commit]
-  );
+  const [zoom, setZoom] = useState(75);
 
-  const undo = () => {
-    const previous = history.at(-1);
-    if (!previous) return;
+  const [leftOpen, setLeftOpen] =
+    useState(true);
 
-    setFuture((items) => [clone(site), ...items]);
-    setHistory((items) => items.slice(0, -1));
-    setSite(clone(previous));
-    setSelectedIds([]);
-  };
+  const [rightOpen, setRightOpen] =
+    useState(true);
 
-  const redo = () => {
-    const next = future[0];
-    if (!next) return;
+  const [saved, setSaved] =
+    useState(true);
 
-    setHistory((items) => [...items, clone(site)]);
-    setFuture((items) => items.slice(1));
-    setSite(clone(next));
-    setSelectedIds([]);
-  };
+  const [marquee, setMarquee] =
+    useState<{
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    } | null>(null);
 
-  const addNode = (type: NodeType) => {
-    const defaults: Record<NodeType, SiteNode> = {
-      section: baseSection(uid()),
-      heading: {
-        id: uid(),
-        type: "heading",
-        content: "New heading",
-        style: {
-          fontSize: "48px",
-          fontWeight: "700"
-        }
-      },
-      paragraph: {
-        id: uid(),
-        type: "paragraph",
-        content: "New paragraph",
-        style: {
-          fontSize: "18px"
-        }
-      },
-      button: {
-        id: uid(),
-        type: "button",
-        content: "Button",
-        style: {
-          width: "160px",
-          height: "48px",
-          background: site.theme.primaryColor,
-          color: "#fff",
-          borderRadius: "8px",
-          paddingTop: "12px",
-          paddingBottom: "12px",
-          textAlign: "center"
-        }
-      },
-      image: {
-        id: uid(),
-        type: "image",
-        style: {
-          width: "420px",
-          height: "280px",
-          objectFit: "cover",
-          borderRadius: "8px"
-        }
-      },
-      video: {
-        id: uid(),
-        type: "video",
-        style: {
-          width: "600px",
-          height: "340px"
-        }
-      },
-      gallery: {
-        id: uid(),
-        type: "gallery",
-        style: {
-          width: "100%"
-        }
-      },
-      divider: {
-        id: uid(),
-        type: "divider",
-        style: {
-          width: "100%",
-          border: "none",
-          borderTop: "1px solid #ddd"
-        }
-      },
-      icon: {
-        id: uid(),
-        type: "icon",
-        content: "★",
-        style: {
-          fontSize: "40px"
-        }
-      },
-      social: {
-        id: uid(),
-        type: "social",
-        content: "Instagram   X   Facebook",
-        style: {
-          fontSize: "16px"
-        }
-      },
-      form: {
-        id: uid(),
-        type: "form",
-        style: {
-          width: "360px",
-          padding: "20px"
-        } as NodeStyle
-      },
-      menu: {
-        id: uid(),
-        type: "menu",
-        content: "Home   About   Contact",
-        style: {
-          fontSize: "16px"
-        }
-      },
-      logo: {
-        id: uid(),
-        type: "logo",
-        content: site.name,
-        style: {
-          fontSize: "22px",
-          fontWeight: "700"
-        }
-      },
-      group: {
-        id: uid(),
-        type: "group",
-        style: {
-          display: "flex",
-          flexDirection: "column",
-          gap: "16px"
-        }
-      }
-    };
+  const canvasRef =
+    useRef<HTMLDivElement>(null);
 
-    const node = defaults[type];
+  const activeSite =
+    workspace.sites.find(
+      (site) =>
+        site.id === workspace.activeSiteId
+    ) ?? workspace.sites[0];
 
-    mutatePage((current) => {
-      if (selected?.type === "section") {
-        return {
-          ...current,
-          components: insertInto(
-            current.components,
-            selected.id,
-            [node]
-          )
-        };
-      }
-
-      const firstSection = current.components.find(
-        (item) => item.type === "section"
+  useEffect(() => {
+    const raw =
+      window.localStorage.getItem(
+        "sytely-workspace"
       );
 
-      if (firstSection) {
-        return {
-          ...current,
-          components: insertInto(
-            current.components,
-            firstSection.id,
-            [node]
-          )
-        };
+    if (raw) {
+      try {
+        const parsed =
+          JSON.parse(raw) as SiteWorkspace;
+
+        if (
+          parsed.sites?.length &&
+          parsed.activeSiteId
+        ) {
+          setWorkspace(parsed);
+          return;
+        }
+      } catch {
+        // Fall through to migration.
       }
-
-      return {
-        ...current,
-        components: [...current.components, node]
-      };
-    });
-
-    setSelectedIds([node.id]);
-  };
-
-  const applyTemplate = (name: string) => {
-    const nodes = clone(templates[name]);
-
-    mutatePage((current) => ({
-      ...current,
-      components: nodes
-    }));
-
-    setSelectedIds([]);
-  };
-
-  const changeStyle = (key: keyof NodeStyle, value: string) => {
-    if (!selectedIds.length) return;
-
-    mutatePage((current) => {
-      let components = current.components;
-
-      for (const id of selectedIds) {
-        components = updateNode(
-          components,
-          id,
-          (node) => ({
-            ...node,
-            style: {
-              ...(node.style ?? {}),
-              [key]: value
-            }
-          })
-        );
-      }
-
-      return {
-        ...current,
-        components
-      };
-    });
-  };
-
-  const changeResponsiveStyle = (
-    key: keyof NodeStyle,
-    value: string
-  ) => {
-    if (!selectedIds.length) return;
-
-    mutatePage((current) => {
-      let components = current.components;
-
-      for (const id of selectedIds) {
-        components = updateNode(
-          components,
-          id,
-          (node) => ({
-            ...node,
-            responsive: {
-              ...(node.responsive ?? {}),
-              [breakpoint]: {
-                ...(node.responsive?.[breakpoint] ?? {}),
-                [key]: value
-              }
-            }
-          })
-        );
-      }
-
-      return {
-        ...current,
-        components
-      };
-    });
-  };
-
-  const changeContent = (value: string) => {
-    if (!selected) return;
-
-    mutatePage((current) => ({
-      ...current,
-      components: updateNode(
-        current.components,
-        selected.id,
-        (node) => ({
-          ...node,
-          content: value
-        })
-      )
-    }));
-  };
-
-  const changePageSetting = (
-    key: keyof SitePage["settings"],
-    value: string | boolean
-  ) => {
-    mutatePage((current) => ({
-      ...current,
-      settings: {
-        ...current.settings,
-        [key]: value
-      }
-    }));
-  };
-
-  const deleteSelected = () => {
-    if (!selectedIds.length) return;
-
-    mutatePage((current) => ({
-      ...current,
-      components: removeNodes(
-        current.components,
-        new Set(selectedIds)
-      ).nodes
-    }));
-
-    setSelectedIds([]);
-  };
-
-  const duplicateSelected = () => {
-    if (!selectedIds.length) return;
-
-    const copies = selectedNodes.map((node) => ({
-      ...clone(node),
-      id: uid(),
-      children: node.children?.map((child) => ({
-        ...clone(child),
-        id: uid()
-      }))
-    }));
-
-    mutatePage((current) => ({
-      ...current,
-      components: [...current.components, ...copies]
-    }));
-
-    setSelectedIds(copies.map((node) => node.id));
-  };
-
-  const groupSelected = () => {
-    if (selectedIds.length < 2) return;
-
-    const selectedSet = new Set(selectedIds);
-    const removed = removeNodes(
-      page.components,
-      selectedSet
-    );
-
-    const group: SiteNode = {
-      id: uid(),
-      type: "group",
-      name: "Group",
-      style: {
-        display: "flex",
-        flexDirection: "column",
-        gap: "16px"
-      },
-      children: removed.removed
-    };
-
-    mutatePage((current) => ({
-      ...current,
-      components: [
-        ...removed.nodes,
-        group
-      ]
-    }));
-
-    setSelectedIds([group.id]);
-  };
-
-  const ungroup = () => {
-    if (!selected || selected.type !== "group") return;
-
-    const children = selected.children ?? [];
-
-    mutatePage((current) => ({
-      ...current,
-      components: [
-        ...removeNodes(
-          current.components,
-          new Set([selected.id])
-        ).nodes,
-        ...children
-      ]
-    }));
-
-    setSelectedIds(children.map((child) => child.id));
-  };
-
-  const copySelected = () => {
-    clipboard.current = clone(selectedNodes);
-  };
-
-  const paste = () => {
-    if (!clipboard.current.length) return;
-
-    const copies = clipboard.current.map((node) => ({
-      ...clone(node),
-      id: uid()
-    }));
-
-    mutatePage((current) => ({
-      ...current,
-      components: [
-        ...current.components,
-        ...copies
-      ]
-    }));
-
-    setSelectedIds(copies.map((node) => node.id));
-  };
-
-  const moveSelected = (
-    dx: number,
-    dy: number
-  ) => {
-    if (!selectedIds.length) return;
-
-    mutatePage((current) => {
-      let components = current.components;
-
-      for (const id of selectedIds) {
-        components = updateNode(
-          components,
-          id,
-          (node) => ({
-            ...node,
-            style: {
-              ...(node.style ?? {}),
-              position: "absolute",
-              left: `calc(${node.style?.left || "0px"} + ${dx}px)`,
-              top: `calc(${node.style?.top || "0px"} + ${dy}px)`
-            }
-          })
-        );
-      }
-
-      return {
-        ...current,
-        components
-      };
-    });
-  };
-
-  const handleSelect = (
-    id: string,
-    event: React.MouseEvent
-  ) => {
-    if (event.shiftKey || event.metaKey || event.ctrlKey) {
-      setSelectedIds((ids) =>
-        ids.includes(id)
-          ? ids.filter((item) => item !== id)
-          : [...ids, id]
-      );
-    } else {
-      setSelectedIds([id]);
     }
 
-    setPageId(pageId);
-    setInspectorTab("design");
-  };
+    const oldSite =
+      window.localStorage.getItem(
+        "sytely-site"
+      );
 
-  const handleCanvasPointerDown = (
-    event: React.PointerEvent<HTMLDivElement>
-  ) => {
+    if (oldSite) {
+      try {
+        const site =
+          JSON.parse(oldSite) as Site;
+
+        const migrated: Site = {
+          ...site,
+          theme: site.theme ?? "system"
+        };
+
+        setWorkspace({
+          version: 1,
+          activeSiteId: migrated.id,
+          sites: [migrated]
+        });
+
+        window.localStorage.setItem(
+          "sytely-workspace",
+          JSON.stringify({
+            version: 1,
+            activeSiteId: migrated.id,
+            sites: [migrated]
+          })
+        );
+      } catch {
+        // Use starter site.
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeSite?.pages.length) return;
+
     if (
-      event.target !== event.currentTarget &&
-      !(event.target as HTMLElement).classList.contains(
-        "canvas-stage"
+      !activeSite.pages.some(
+        (page) => page.id === activePageId
+      )
+    ) {
+      setActivePageId(
+        activeSite.pages[0].id
+      );
+    }
+  }, [activeSite, activePageId]);
+
+  const activePage =
+    activeSite?.pages.find(
+      (page) => page.id === activePageId
+    ) ?? activeSite?.pages[0];
+
+  const allNodes = useMemo(
+    () =>
+      activePage
+        ? collect(activePage.components)
+        : [],
+    [activePage]
+  );
+
+  const selectedNodes = allNodes.filter(
+    (node) => selectedIds.includes(node.id)
+  );
+
+  const selectedNode =
+    selectedNodes.length === 1
+      ? selectedNodes[0]
+      : null;
+
+  function updateWorkspace(
+    next: SiteWorkspace
+  ) {
+    setWorkspace(next);
+    setSaved(false);
+  }
+
+  function updateSite(
+    updater: (site: Site) => Site
+  ) {
+    updateWorkspace({
+      ...workspace,
+      sites: workspace.sites.map((site) =>
+        site.id === activeSite.id
+          ? updater(site)
+          : site
+      )
+    });
+  }
+
+  function updatePage(
+    updater: (page: SitePage) => SitePage
+  ) {
+    updateSite((site) => ({
+      ...site,
+      pages: site.pages.map((page) =>
+        page.id === activePage.id
+          ? updater(page)
+          : page
+      )
+    }));
+  }
+
+  function updateNodeStyle(
+    key: string,
+    value: unknown
+  ) {
+    if (!selectedIds.length) return;
+
+    updatePage((page) => ({
+      ...page,
+      components: selectedIds.reduce(
+        (tree, id) =>
+          updateTree(
+            tree,
+            id,
+            (node) => ({
+              ...node,
+              styles: {
+                ...(node.styles ?? {}),
+                [key]: value
+              }
+            })
+          ),
+        page.components
+      )
+    }));
+  }
+
+  function updateNodeProp(
+    key: string,
+    value: unknown
+  ) {
+    if (!selectedIds.length) return;
+
+    updatePage((page) => ({
+      ...page,
+      components: selectedIds.reduce(
+        (tree, id) =>
+          updateTree(
+            tree,
+            id,
+            (node) => ({
+              ...node,
+              props: {
+                ...node.props,
+                [key]: value
+              }
+            })
+          ),
+        page.components
+      )
+    }));
+  }
+
+  function select(
+    id: string,
+    additive: boolean
+  ) {
+    setPageSelected(false);
+
+    setSelectedIds((current) =>
+      additive
+        ? current.includes(id)
+          ? current.filter(
+              (item) => item !== id
+            )
+          : [...current, id]
+        : [id]
+    );
+  }
+
+  function makeComponentAndInsert(
+    type: ComponentType
+  ) {
+    if (!activePage) return;
+
+    const item = makeComponent(type);
+
+    let components =
+      activePage.components;
+
+    if (pageSelected) {
+      if (item.type !== "section") {
+        components = [
+          ...components,
+          makeSection(uid(), [item])
+        ];
+      } else {
+        components = [
+          ...components,
+          item
+        ];
+      }
+    } else if (selectedNode) {
+      if (
+        selectedNode.type === "section"
+      ) {
+        components = insertTree(
+          components,
+          selectedNode.id,
+          item,
+          item.type === "section"
+            ? "after"
+            : "inside"
+        );
+      } else {
+        const parent = findParent(
+          components,
+          selectedNode.id
+        );
+
+        if (parent?.type === "section") {
+          components = insertTree(
+            components,
+            parent.id,
+            item,
+            item.type === "section"
+              ? "after"
+              : "inside"
+          );
+        }
+      }
+    } else {
+      const section =
+        components.find(
+          (node) =>
+            node.type === "section"
+        );
+
+      components = section
+        ? insertTree(
+            components,
+            section.id,
+            item,
+            "inside"
+          )
+        : [
+            ...components,
+            makeSection(uid(), [item])
+          ];
+    }
+
+    updatePage((page) => ({
+      ...page,
+      components
+    }));
+
+    setSelectedIds([item.id]);
+    setPageSelected(false);
+  }
+
+  function readPayload(
+    event: DragEvent
+  ): DragPayload | null {
+    const raw =
+      event.dataTransfer.getData(
+        "application/x-sytely"
+      );
+
+    if (!raw) return null;
+
+    try {
+      return JSON.parse(raw) as DragPayload;
+    } catch {
+      return null;
+    }
+  }
+
+  function startPaletteDrag(
+    event: DragEvent,
+    payload: DragPayload,
+    label: string
+  ) {
+    event.dataTransfer.effectAllowed =
+      payload.kind === "node"
+        ? "move"
+        : "copy";
+
+    event.dataTransfer.setData(
+      "application/x-sytely",
+      JSON.stringify(payload)
+    );
+
+    setDragLabel(label);
+  }
+
+  function startNodeDrag(
+    event: DragEvent,
+    id: string
+  ) {
+    const ids =
+      selectedIds.includes(id)
+        ? selectedIds
+        : [id];
+
+    startPaletteDrag(
+      event,
+      {
+        kind: "node",
+        nodeIds: ids
+      },
+      ids.length > 1
+        ? `${ids.length} items`
+        : "Move"
+    );
+  }
+
+  function getDropPosition(
+    event: DragEvent,
+    node: ComponentNode
+  ): DropPosition {
+    const rect =
+      event.currentTarget.getBoundingClientRect();
+
+    const ratio =
+      (event.clientY - rect.top) /
+      Math.max(rect.height, 1);
+
+    if (node.type === "section") {
+      if (ratio < 0.18) return "before";
+      if (ratio > 0.82) return "after";
+      return "inside";
+    }
+
+    return ratio < 0.5
+      ? "before"
+      : "after";
+  }
+
+  function handleDragOver(
+    event: DragEvent,
+    node: ComponentNode
+  ) {
+    const payload = readPayload(event);
+
+    if (!payload) return;
+
+    const position =
+      getDropPosition(event, node);
+
+    if (
+      payload.kind === "node" &&
+      payload.nodeIds.some(
+        (id) =>
+          id === node.id ||
+          Boolean(
+            findNode(
+              activePage.components,
+              id
+            ) &&
+              contains(
+                findNode(
+                  activePage.components,
+                  id
+                )!,
+                node.id
+              )
+          )
       )
     ) {
       return;
     }
 
-    dragStart.current = {
+    if (
+      position === "inside" &&
+      node.type !== "section"
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect =
+      payload.kind === "node"
+        ? "move"
+        : "copy";
+
+    setDropTarget({
+      id: node.id,
+      position
+    });
+
+    setDragPoint({
       x: event.clientX,
       y: event.clientY
-    };
-
-    setMarquee({
-      x: event.clientX,
-      y: event.clientY,
-      width: 0,
-      height: 0
     });
-  };
+  }
 
-  useEffect(() => {
-    const move = (event: PointerEvent) => {
-      if (!dragStart.current) return;
+  function handleDrop(
+    event: DragEvent,
+    target?: ComponentNode
+  ) {
+    event.preventDefault();
 
-      const x = Math.min(
-        dragStart.current.x,
-        event.clientX
-      );
-      const y = Math.min(
-        dragStart.current.y,
-        event.clientY
-      );
-      const width = Math.abs(
-        event.clientX - dragStart.current.x
-      );
-      const height = Math.abs(
-        event.clientY - dragStart.current.y
+    const payload = readPayload(event);
+
+    if (!payload) return;
+
+    const effectiveTarget =
+      target ??
+      (dropTarget?.id
+        ? findNode(
+            activePage.components,
+            dropTarget.id
+          )
+        : null);
+
+    const position = target
+      ? getDropPosition(event, target)
+      : dropTarget?.position ?? "after";
+
+    let components =
+      activePage.components;
+
+    if (payload.kind === "component") {
+      const item = makeComponent(
+        payload.componentType
       );
 
+      components = effectiveTarget
+        ? insertTree(
+            components,
+            effectiveTarget.id,
+            item,
+            position
+          )
+        : [
+            ...components,
+            item.type === "section"
+              ? item
+              : makeSection(uid(), [item])
+          ];
+
+      updatePage((page) => ({
+        ...page,
+        components
+      }));
+
+      setSelectedIds([item.id]);
+      setPageSelected(false);
+    }
+
+    if (payload.kind === "template") {
+      const template =
+        templates.find(
+          (item) =>
+            item.id ===
+            payload.templateId
+        );
+
+      if (template) {
+        const item = cloneIds(
+          template.node
+        );
+
+        components = effectiveTarget
+          ? insertTree(
+              components,
+              effectiveTarget.id,
+              item,
+              position
+            )
+          : [
+              ...components,
+              item
+            ];
+
+        updatePage((page) => ({
+          ...page,
+          components
+        }));
+
+        setSelectedIds([item.id]);
+        setPageSelected(false);
+      }
+    }
+
+    if (payload.kind === "node") {
+      const moving = payload.nodeIds
+        .map((id) =>
+          findNode(
+            activePage.components,
+            id
+          )
+        )
+        .filter(
+          Boolean
+        ) as ComponentNode[];
+
+      if (
+        effectiveTarget &&
+        moving.length &&
+        !moving.some((item) =>
+          contains(
+            item,
+            effectiveTarget.id
+          )
+        )
+      ) {
+        for (const item of moving) {
+          components = removeTree(
+            components,
+            item.id
+          );
+        }
+
+        components = effectiveTarget
+          ? moving.reduce(
+              (tree, item) =>
+                insertTree(
+                  tree,
+                  effectiveTarget.id,
+                  item,
+                  position
+                ),
+              components
+            )
+          : components;
+
+        updatePage((page) => ({
+          ...page,
+          components
+        }));
+
+        setSelectedIds(
+          moving.map(
+            (item) => item.id
+          )
+        );
+      }
+    }
+
+    setDropTarget(null);
+    setDragLabel(null);
+  }
+
+  function deleteNode(id: string) {
+    updatePage((page) => ({
+      ...page,
+      components: removeTree(
+        page.components,
+        id
+      )
+    }));
+
+    setSelectedIds((current) =>
+      current.filter(
+        (item) => item !== id
+      )
+    );
+
+    setPageSelected(
+      selectedIds.length <= 1
+    );
+  }
+
+  function deleteSelected() {
+    if (!selectedIds.length) return;
+
+    updatePage((page) => ({
+      ...page,
+      components: selectedIds.reduce(
+        (tree, id) =>
+          removeTree(tree, id),
+        page.components
+      )
+    }));
+
+    setSelectedIds([]);
+    setPageSelected(true);
+  }
+
+  function duplicateSelected() {
+    if (!selectedNodes.length) return;
+
+    let components =
+      activePage.components;
+
+    const clones =
+      selectedNodes.map(cloneIds);
+
+    selectedNodes.forEach(
+      (node, index) => {
+        const parent = findParent(
+          components,
+          node.id
+        );
+
+        components = insertTree(
+          components,
+          parent?.id ?? node.id,
+          clones[index],
+          "after"
+        );
+      }
+    );
+
+    updatePage((page) => ({
+      ...page,
+      components
+    }));
+
+    setSelectedIds(
+      clones.map((node) => node.id)
+    );
+  }
+
+  function addSite() {
+    const site = starterSite();
+
+    updateWorkspace({
+      ...workspace,
+      activeSiteId: site.id,
+      sites: [
+        ...workspace.sites,
+        site
+      ]
+    });
+
+    setActivePageId(
+      site.pages[0].id
+    );
+    setSelectedIds([]);
+    setPageSelected(true);
+  }
+
+  function save() {
+    window.localStorage.setItem(
+      "sytely-workspace",
+      JSON.stringify(workspace)
+    );
+
+    window.localStorage.setItem(
+      "sytely-site",
+      JSON.stringify(activeSite)
+    );
+
+    setSaved(true);
+  }
+
+  function updateTheme(
+    theme: SiteTheme
+  ) {
+    updateSite((site) => ({
+      ...site,
+      theme
+    }));
+  }
+
+  function startMarquee(
+    event: ReactPointerEvent<HTMLDivElement>
+  ) {
+    if (event.button !== 0) return;
+
+    if (
+      (event.target as HTMLElement).closest(
+        ".editor-node,.floating-toolbar,.canvas-controls,.library-panel,.right-panel,.left-rail,.right-rail,.topbar"
+      )
+    ) {
+      return;
+    }
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    setSelectedIds([]);
+    setPageSelected(false);
+
+    const move = (pointer: PointerEvent) => {
       setMarquee({
-        x,
-        y,
-        width,
-        height
+        x: Math.min(
+          startX,
+          pointer.clientX
+        ),
+        y: Math.min(
+          startY,
+          pointer.clientY
+        ),
+        w: Math.abs(
+          pointer.clientX - startX
+        ),
+        h: Math.abs(
+          pointer.clientY - startY
+        )
       });
     };
 
-    const up = () => {
-      if (!marquee) {
-        dragStart.current = null;
-        return;
-      }
-
-      const elements = document.querySelectorAll(
-        "[data-sytely-node]"
+    const up = (pointer: PointerEvent) => {
+      const left = Math.min(
+        startX,
+        pointer.clientX
       );
 
-      const ids: string[] = [];
+      const right = Math.max(
+        startX,
+        pointer.clientX
+      );
 
-      elements.forEach((element) => {
-        const rect = element.getBoundingClientRect();
+      const top = Math.min(
+        startY,
+        pointer.clientY
+      );
 
-        const intersects =
-          rect.left < marquee.x + marquee.width &&
-          rect.right > marquee.x &&
-          rect.top < marquee.y + marquee.height &&
-          rect.bottom > marquee.y;
+      const bottom = Math.max(
+        startY,
+        pointer.clientY
+      );
 
-        if (intersects) {
-          const id = element.getAttribute(
-            "data-sytely-node"
+      if (
+        right - left > 6 ||
+        bottom - top > 6
+      ) {
+        const ids = allNodes
+          .filter((node) => {
+            const element =
+              document.querySelector<HTMLElement>(
+                `[data-editor-node-id="${node.id}"]`
+              );
+
+            if (!element) return false;
+
+            const rect =
+              element.getBoundingClientRect();
+
+            return (
+              rect.left < right &&
+              rect.right > left &&
+              rect.top < bottom &&
+              rect.bottom > top
+            );
+          })
+          .map(
+            (node) => node.id
           );
 
-          if (id) ids.push(id);
-        }
-      });
-
-      setSelectedIds(
-        Array.from(new Set(ids)).filter(
-          (id) => !!findNode(page.components, id)
-        )
-      );
+        setSelectedIds(ids);
+        setPageSelected(false);
+      } else {
+        setSelectedIds([]);
+        setPageSelected(true);
+      }
 
       setMarquee(null);
-      dragStart.current = null;
+
+      window.removeEventListener(
+        "pointermove",
+        move
+      );
+
+      window.removeEventListener(
+        "pointerup",
+        up
+      );
     };
 
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
+    window.addEventListener(
+      "pointermove",
+      move
+    );
 
-    return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-  }, [marquee, page.components]);
+    window.addEventListener(
+      "pointerup",
+      up
+    );
+  }
 
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement;
-
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
-        return;
-      }
-
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "z"
-      ) {
-        event.preventDefault();
-
-        if (event.shiftKey) redo();
-        else undo();
-
-        return;
-      }
-
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "c"
-      ) {
-        event.preventDefault();
-        copySelected();
-        return;
-      }
-
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "v"
-      ) {
-        event.preventDefault();
-        paste();
-        return;
-      }
-
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.key.toLowerCase() === "d"
-      ) {
-        event.preventDefault();
-        duplicateSelected();
-        return;
-      }
-
-      if (event.key === "Delete" || event.key === "Backspace") {
-        event.preventDefault();
-        deleteSelected();
-        return;
-      }
-
-      if (event.key === "ArrowLeft") moveSelected(-5, 0);
-      if (event.key === "ArrowRight") moveSelected(5, 0);
-      if (event.key === "ArrowUp") moveSelected(0, -5);
-      if (event.key === "ArrowDown") moveSelected(0, 5);
-    };
-
-    window.addEventListener("keydown", keydown);
-
-    return () =>
-      window.removeEventListener("keydown", keydown);
-  });
-
-  const layerList = useMemo(() => {
-    const list: SiteNode[] = [];
-    walkNodes(page.components, (node) => list.push(node));
-    return list;
-  }, [page.components]);
+  if (!activeSite || !activePage) {
+    return null;
+  }
 
   return (
-    <div
-      className="sytely-editor"
-      style={{
-        fontFamily: site.theme.fontFamily
-      }}
-    >
+    <div className="editor-shell">
       <header className="topbar">
-        <div className="brand">Sytely</div>
+        <div className="top-left">
+          <a
+            className="editor-brand"
+            href="/"
+          >
+            Sytely
+          </a>
 
-        <button
-          onClick={undo}
-          disabled={!history.length}
-          title="Undo"
-        >
-          ↶
-        </button>
+          <select
+            className="site-switcher"
+            value={activeSite.id}
+            onChange={(event) => {
+              const id =
+                event.target.value;
 
-        <button
-          onClick={redo}
-          disabled={!future.length}
-          title="Redo"
-        >
-          ↷
-        </button>
+              const site =
+                workspace.sites.find(
+                  (item) =>
+                    item.id === id
+                );
 
-        <div className="device-switcher">
-          {(["desktop", "tablet", "mobile"] as Breakpoint[]).map(
-            (item) => (
-              <button
-                key={item}
-                className={
-                  breakpoint === item ? "active" : ""
-                }
-                onClick={() => setBreakpoint(item)}
-              >
-                {item === "desktop"
-                  ? "Desktop"
-                  : item === "tablet"
-                    ? "Tablet"
-                    : "Mobile"}
-              </button>
-            )
-          )}
+              if (!site) return;
+
+              setWorkspace({
+                ...workspace,
+                activeSiteId: id
+              });
+
+              setActivePageId(
+                site.pages[0]?.id ?? ""
+              );
+
+              setSelectedIds([]);
+              setPageSelected(true);
+            }}
+          >
+            {workspace.sites.map(
+              (site) => (
+                <option
+                  key={site.id}
+                  value={site.id}
+                >
+                  {site.name}
+                </option>
+              )
+            )}
+          </select>
+
+          <button
+            className="new-site"
+            onClick={addSite}
+          >
+            + Website
+          </button>
+
+          <div className="page-tabs">
+            {activeSite.pages.map(
+              (page) => (
+                <button
+                  key={page.id}
+                  className={
+                    page.id ===
+                    activePage.id
+                      ? "active"
+                      : ""
+                  }
+                  onClick={() => {
+                    setActivePageId(
+                      page.id
+                    );
+                    setSelectedIds([]);
+                    setPageSelected(true);
+                  }}
+                >
+                  {page.name}
+                </button>
+              )
+            )}
+          </div>
         </div>
 
-        <div className="top-spacer" />
+        <div className="top-center">
+          {(
+            [
+              "desktop",
+              "tablet",
+              "mobile"
+            ] as Device[]
+          ).map((item) => (
+            <button
+              key={item}
+              className={
+                device === item
+                  ? "active"
+                  : ""
+              }
+              onClick={() =>
+                setDevice(item)
+              }
+            >
+              {item[0].toUpperCase() +
+                item.slice(1)}
+            </button>
+          ))}
+        </div>
 
-        <button onClick={() => setZoom(zoom - 10)}>
-          −
-        </button>
+        <div className="top-right">
+          <span className="save-state">
+            {saved ? "Saved" : "Unsaved"}
+          </span>
 
-        <span className="zoom">{zoom}%</span>
+          <button
+            onClick={() =>
+              setZoom(
+                Math.max(
+                  50,
+                  zoom - 5
+                )
+              )
+            }
+          >
+            −
+          </button>
 
-        <button onClick={() => setZoom(zoom + 10)}>
-          +
-        </button>
+          <span className="zoom">
+            {zoom}%
+          </span>
 
-        <button
-          onClick={() =>
-            window.open(
-              `/preview?page=${encodeURIComponent(page.settings.slug)}`,
-              "_blank"
-            )
-          }
-        >
-          Preview
-        </button>
+          <button
+            onClick={() =>
+              setZoom(
+                Math.min(
+                  120,
+                  zoom + 5
+                )
+              )
+            }
+          >
+            +
+          </button>
 
-        <button
-          className="primary-button"
-          onClick={() => {
-            localStorage.setItem(
-              "sytely-site",
-              JSON.stringify(site)
-            );
-            alert("Site saved.");
-          }}
-        >
-          Save
-        </button>
+          <button
+            className="secondary-action"
+            onClick={save}
+          >
+            Save
+          </button>
 
-        <button
-          className="publish-button"
-          onClick={() => {
-            localStorage.setItem(
-              "sytely-site",
-              JSON.stringify(site)
-            );
-            window.open("/", "_blank");
-          }}
-        >
-          Publish
-        </button>
+          <a
+            className="secondary-action"
+            href={`/preview?site=${encodeURIComponent(
+              activeSite.id
+            )}&page=${encodeURIComponent(
+              activePage.slug
+            )}`}
+            target="_blank"
+          >
+            Preview
+          </a>
+
+          <button
+            className="publish-action"
+            onClick={save}
+          >
+            Publish
+          </button>
+        </div>
       </header>
 
-      <div className="workspace">
-        <aside className="left-panel">
-          <div className="panel-tabs">
+      <div
+        className={[
+          "workspace",
+          leftOpen
+            ? "left-open"
+            : "left-collapsed",
+          rightOpen
+            ? "right-open"
+            : "right-collapsed"
+        ].join(" ")}
+      >
+        <aside className="left-rail">
+          {(
+            [
+              "components",
+              "templates",
+              "pages",
+              "layers"
+            ] as Tool[]
+          ).map((item) => (
             <button
-              className={leftTab === "add" ? "active" : ""}
-              onClick={() => setLeftTab("add")}
+              key={item}
+              className={
+                tool === item
+                  ? "active"
+                  : ""
+              }
+              onClick={() => {
+                setTool(item);
+                setLeftOpen(true);
+              }}
             >
-              Add
+              <span>
+                {item === "components"
+                  ? "+"
+                  : item === "templates"
+                    ? "▦"
+                    : item === "pages"
+                      ? "□"
+                      : "☷"}
+              </span>
+              {item[0].toUpperCase() +
+                item.slice(1)}
             </button>
-            <button
-              className={leftTab === "pages" ? "active" : ""}
-              onClick={() => setLeftTab("pages")}
-            >
-              Pages
-            </button>
-            <button
-              className={leftTab === "layers" ? "active" : ""}
-              onClick={() => setLeftTab("layers")}
-            >
-              Layers
-            </button>
-          </div>
-
-          {leftTab === "add" && (
-            <div className="panel-scroll">
-              <h3>Elements</h3>
-
-              <div className="element-grid">
-                {[
-                  ["section", "Section"],
-                  ["heading", "Heading"],
-                  ["paragraph", "Text"],
-                  ["button", "Button"],
-                  ["image", "Image"],
-                  ["video", "Video"],
-                  ["gallery", "Gallery"],
-                  ["divider", "Divider"],
-                  ["icon", "Icon"],
-                  ["social", "Social"],
-                  ["form", "Form"],
-                  ["menu", "Menu"],
-                  ["logo", "Logo"]
-                ].map(([type, label]) => (
-                  <button
-                    key={type}
-                    onClick={() =>
-                      addNode(type as NodeType)
-                    }
-                  >
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-
-              <h3>Templates</h3>
-
-              <div className="template-list">
-                {Object.keys(templates).map((name) => (
-                  <button
-                    key={name}
-                    onClick={() => applyTemplate(name)}
-                  >
-                    {name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {leftTab === "pages" && (
-            <div className="panel-scroll">
-              <div className="panel-heading">
-                <h3>Pages</h3>
-
-                <button
-                  onClick={() => {
-                    const newPage: SitePage = {
-                      id: uid(),
-                      name: "New Page",
-                      settings: {
-                        title: "New Page",
-                        slug: "/new-page"
-                      },
-                      components: [
-                        baseSection(uid())
-                      ]
-                    };
-
-                    const next = clone(site);
-                    next.pages.push(newPage);
-                    commit(next);
-                    setPageId(newPage.id);
-                  }}
-                >
-                  +
-                </button>
-              </div>
-
-              {site.pages.map((item) => (
-                <button
-                  className={
-                    item.id === pageId
-                      ? "page-item active"
-                      : "page-item"
-                  }
-                  key={item.id}
-                  onClick={() => {
-                    setPageId(item.id);
-                    setSelectedIds([]);
-                  }}
-                >
-                  <span>{item.name}</span>
-                  <small>{item.settings.slug}</small>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {leftTab === "layers" && (
-            <div className="panel-scroll">
-              <h3>Layers</h3>
-
-              {layerList.map((node) => (
-                <button
-                  className={
-                    selectedIds.includes(node.id)
-                      ? "layer-item active"
-                      : "layer-item"
-                  }
-                  key={node.id}
-                  onClick={() =>
-                    setSelectedIds([node.id])
-                  }
-                >
-                  <span>{nodeLabel(node)}</span>
-                  <small>{node.type}</small>
-                </button>
-              ))}
-            </div>
-          )}
+          ))}
         </aside>
 
-        <main className="canvas-area">
-          <div className="ruler-horizontal">
-            {Array.from({ length: 20 }).map((_, index) => (
-              <span key={index}>{index * 100}</span>
-            ))}
-          </div>
+        {leftOpen && (
+          <aside className="library-panel">
+            <div className="panel-header">
+              <div>
+                <strong>
+                  {tool[0].toUpperCase() +
+                    tool.slice(1)}
+                </strong>
+                <small>
+                  {tool === "components"
+                    ? "Add building blocks"
+                    : "Website structure"}
+                </small>
+              </div>
 
-          <div className="ruler-vertical">
-            {Array.from({ length: 20 }).map((_, index) => (
-              <span key={index}>{index * 100}</span>
-            ))}
+              <button
+                onClick={() =>
+                  setLeftOpen(false)
+                }
+              >
+                ‹
+              </button>
+            </div>
+
+            <div className="panel-scroll">
+              {tool ===
+                "components" && (
+                <>
+                  {[
+                    ...new Set(
+                      componentCatalog.map(
+                        (item) =>
+                          item.category
+                      )
+                    )
+                  ].map(
+                    (category) => (
+                      <section
+                        className="catalog-group"
+                        key={category}
+                      >
+                        <h4>
+                          {category}
+                        </h4>
+
+                        {componentCatalog
+                          .filter(
+                            (item) =>
+                              item.category ===
+                              category
+                          )
+                          .map(
+                            (
+                              component
+                            ) => (
+                              <button
+                                className="catalog-item"
+                                key={
+                                  component.type
+                                }
+                                draggable
+                                onDragStart={(
+                                  event
+                                ) =>
+                                  startPaletteDrag(
+                                    event,
+                                    {
+                                      kind: "component",
+                                      componentType:
+                                        component.type
+                                    },
+                                    component.label
+                                  )
+                                }
+                                onClick={() =>
+                                  makeComponentAndInsert(
+                                    component.type
+                                  )
+                                }
+                              >
+                                <span className="catalog-icon">
+                                  {component.type ===
+                                  "heading"
+                                    ? "H"
+                                    : component.type ===
+                                        "text"
+                                      ? "T"
+                                      : component.type ===
+                                          "image"
+                                        ? "▧"
+                                        : "+"}
+                                </span>
+
+                                <span>
+                                  <b>
+                                    {
+                                      component.label
+                                    }
+                                  </b>
+                                  <small>
+                                    {
+                                      component.description
+                                    }
+                                  </small>
+                                </span>
+                              </button>
+                            )
+                          )}
+                      </section>
+                    )
+                  )}
+                </>
+              )}
+
+              {tool ===
+                "templates" && (
+                <div className="template-grid">
+                  {templates.map(
+                    (template) => (
+                      <button
+                        key={template.id}
+                        className="template-card"
+                        draggable
+                        onDragStart={(
+                          event
+                        ) =>
+                          startPaletteDrag(
+                            event,
+                            {
+                              kind: "template",
+                              templateId:
+                                template.id
+                            },
+                            template.name
+                          )
+                        }
+                        onClick={() => {
+                          const item =
+                            cloneIds(
+                              template.node
+                            );
+
+                          updatePage(
+                            (page) => ({
+                              ...page,
+                              components:
+                                [
+                                  ...page.components,
+                                  item
+                                ]
+                            })
+                          );
+
+                          setSelectedIds([
+                            item.id
+                          ]);
+                          setPageSelected(
+                            false
+                          );
+                        }}
+                      >
+                        <div className="template-thumb">
+                          <span />
+                          <span />
+                          <span />
+                        </div>
+                        <b>
+                          {template.name}
+                        </b>
+                        <small>
+                          {template.category}
+                        </small>
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+
+              {tool === "pages" && (
+                <div className="page-list">
+                  {activeSite.pages.map(
+                    (page) => (
+                      <button
+                        key={page.id}
+                        className={
+                          page.id ===
+                          activePage.id
+                            ? "selected"
+                            : ""
+                        }
+                        onClick={() => {
+                          setActivePageId(
+                            page.id
+                          );
+                          setSelectedIds(
+                            []
+                          );
+                          setPageSelected(
+                            true
+                          );
+                        }}
+                      >
+                        <b>
+                          {page.name}
+                        </b>
+                        <small>
+                          {page.slug}
+                        </small>
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+
+              {tool === "layers" && (
+                <div className="layer-list">
+                  {allNodes.map(
+                    (node) => (
+                      <button
+                        key={node.id}
+                        className={
+                          selectedIds.includes(
+                            node.id
+                          )
+                            ? "selected"
+                            : ""
+                        }
+                        onClick={() =>
+                          select(
+                            node.id,
+                            false
+                          )
+                        }
+                      >
+                        {node.type}
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
+
+        <main
+          className="canvas-area"
+          ref={canvasRef}
+          onPointerDown={
+            startMarquee
+          }
+          onDragOver={(event) => {
+            event.preventDefault();
+
+            setDragPoint({
+              x: event.clientX,
+              y: event.clientY
+            });
+          }}
+          onDrop={(event) =>
+            handleDrop(event)
+          }
+        >
+          <div className="canvas-controls">
+            <button
+              onClick={() =>
+                setZoom(
+                  Math.max(
+                    50,
+                    zoom - 5
+                  )
+                )
+              }
+            >
+              −
+            </button>
+
+            <span>{zoom}%</span>
+
+            <button
+              onClick={() =>
+                setZoom(
+                  Math.min(
+                    120,
+                    zoom + 5
+                  )
+                )
+              }
+            >
+              +
+            </button>
           </div>
 
           <div
             className="canvas-scroll"
-            ref={canvasRef}
-            onPointerDown={handleCanvasPointerDown}
+            style={{
+              transform: `scale(${
+                zoom / 100
+              })`
+            }}
           >
             <div
-              className="canvas-stage"
+              className={`page-frame device-${device}`}
               style={{
-                width:
-                  breakpoint === "desktop"
-                    ? 1200
-                    : breakpoint === "tablet"
-                      ? 768
-                      : 390,
-                transform: `scale(${zoom / 100})`,
-                transformOrigin: "top center"
+                background: String(
+                  activePage.styles
+                    ?.background ??
+                    "#fff"
+                ),
+                paddingTop:
+                  activePage.margins
+                    .top,
+                paddingRight:
+                  activePage.margins
+                    .right,
+                paddingBottom:
+                  activePage.margins
+                    .bottom,
+                paddingLeft:
+                  activePage.margins
+                    .left
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+
+                if (!dropTarget) {
+                  setDropTarget({
+                    id: null,
+                    position:
+                      "inside"
+                  });
+                }
               }}
             >
-              <div className="snap-guide horizontal" />
-              <div className="snap-guide vertical" />
-
-              <SytelyRenderer
-                nodes={page.components}
-                breakpoint={breakpoint}
-                editable
-                selectedIds={selectedIds}
-                onSelect={handleSelect}
-              />
-
-              {page.components.length === 0 && (
-                <div className="empty-canvas">
-                  Add a section to start building.
-                </div>
+              {activePage.components.map(
+                (node) => (
+                  <EditorNode
+                    key={node.id}
+                    node={node}
+                    selectedIds={
+                      selectedIds
+                    }
+                    dropTarget={
+                      dropTarget
+                    }
+                    onSelect={
+                      select
+                    }
+                    onDragStart={
+                      startNodeDrag
+                    }
+                    onDragOver={
+                      handleDragOver
+                    }
+                    onDrop={
+                      handleDrop
+                    }
+                    onDragEnd={() => {
+                      setDropTarget(
+                        null
+                      );
+                      setDragLabel(
+                        null
+                      );
+                    }}
+                    onDelete={
+                      deleteNode
+                    }
+                    onResize={() => {}}
+                  />
+                )
               )}
+
+              <div className="page-bottom-space" />
             </div>
           </div>
+
+          {dragLabel && (
+            <div
+              className="drag-ghost"
+              style={{
+                left:
+                  dragPoint.x + 14,
+                top:
+                  dragPoint.y + 14
+              }}
+            >
+              {dragLabel}
+            </div>
+          )}
+
+          {dropTarget && (
+            <div
+              className="global-drop-indicator"
+              style={{
+                left:
+                  dragPoint.x + 10,
+                top:
+                  dragPoint.y + 10
+              }}
+            >
+              {dropTarget.position ===
+              "inside"
+                ? "Drop inside"
+                : "Insert here"}
+            </div>
+          )}
 
           {marquee && (
             <div
@@ -1340,661 +2243,849 @@ export default function EditorPage() {
               style={{
                 left: marquee.x,
                 top: marquee.y,
-                width: marquee.width,
-                height: marquee.height
+                width: marquee.w,
+                height: marquee.h
               }}
             />
           )}
 
-          <div className="page-tabs">
-            {site.pages.map((item) => (
+          {selectedNodes.length >
+            0 && (
+            <div className="floating-toolbar">
               <button
-                className={
-                  item.id === pageId ? "active" : ""
+                onClick={
+                  duplicateSelected
                 }
-                key={item.id}
-                onClick={() => {
-                  setPageId(item.id);
-                  setSelectedIds([]);
-                }}
               >
-                {item.name}
+                Duplicate
               </button>
-            ))}
-          </div>
+
+              <button
+                onClick={() => {
+                  // Grouping is handled by
+                  // the existing section model.
+                  if (
+                    selectedNodes.length <
+                    2
+                  )
+                    return;
+
+                  const parent =
+                    findParent(
+                      activePage.components,
+                      selectedNodes[0]
+                        .id
+                    );
+
+                  if (
+                    !selectedNodes.every(
+                      (node) =>
+                        findParent(
+                          activePage.components,
+                          node.id
+                        )?.id ===
+                        parent?.id
+                    )
+                  ) {
+                    return;
+                  }
+
+                  const group =
+                    makeSection(
+                      uid(),
+                      selectedNodes
+                    );
+
+                  updatePage(
+                    (page) => ({
+                      ...page,
+                      components:
+                        parent
+                          ? updateTree(
+                              page.components,
+                              parent.id,
+                              (
+                                parentNode
+                              ) => ({
+                                ...parentNode,
+                                children:
+                                  [
+                                    group,
+                                    ...(parentNode.children ??
+                                      []).filter(
+                                      (
+                                        child
+                                      ) =>
+                                        !selectedIds.includes(
+                                          child.id
+                                        )
+                                    )
+                                  ]
+                              })
+                            )
+                          : [
+                              group,
+                              ...page.components.filter(
+                                (
+                                  node
+                                ) =>
+                                  !selectedIds.includes(
+                                    node.id
+                                  )
+                              )
+                            ]
+                    })
+                  );
+
+                  setSelectedIds([
+                    group.id
+                  ]);
+                }}
+                disabled={
+                  selectedNodes.length <
+                  2
+                }
+              >
+                Group
+              </button>
+
+              <button
+                onClick={
+                  deleteSelected
+                }
+              >
+                Delete
+              </button>
+            </div>
+          )}
         </main>
 
-        <aside className="inspector">
-          <div className="inspector-tabs">
-            <button
-              className={
-                inspectorTab === "design" ? "active" : ""
-              }
-              onClick={() => setInspectorTab("design")}
-            >
-              Design
-            </button>
-            <button
-              className={
-                inspectorTab === "layout" ? "active" : ""
-              }
-              onClick={() => setInspectorTab("layout")}
-            >
-              Layout
-            </button>
-            <button
-              className={
-                inspectorTab === "position" ? "active" : ""
-              }
-              onClick={() => setInspectorTab("position")}
-            >
-              Position
-            </button>
-            <button
-              className={
-                inspectorTab === "page" ? "active" : ""
-              }
-              onClick={() => setInspectorTab("page")}
-            >
-              Page
-            </button>
-          </div>
+        {rightOpen && (
+          <aside className="right-panel">
+            <div className="panel-header">
+              <div>
+                <strong>
+                  {pageSelected
+                    ? "Page"
+                    : selectedNodes.length
+                      ? `${selectedNodes.length} selected`
+                      : "Inspector"}
+                </strong>
+                <small>
+                  Properties
+                </small>
+              </div>
 
-          <div className="inspector-scroll">
-            {selected && inspectorTab !== "page" ? (
-              <>
-                <div className="selection-title">
-                  <strong>
-                    {selectedIds.length > 1
-                      ? `${selectedIds.length} elements selected`
-                      : nodeLabel(selected)}
-                  </strong>
+              <button
+                onClick={() =>
+                  setRightOpen(false)
+                }
+              >
+                ›
+              </button>
+            </div>
 
-                  <small>
-                    Type: {selected.type}
-                  </small>
-                </div>
-
-                {selectedIds.length > 1 && (
-                  <div className="inspector-section">
-                    <h4>Selection</h4>
-
-                    <button onClick={groupSelected}>
-                      Group
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        selectedNodes.forEach(() =>
-                          changeStyle(
-                            "alignSelf",
-                            "center"
-                          )
-                        );
-                      }}
-                    >
-                      Align center
-                    </button>
-                  </div>
-                )}
-
-                {(selected.type === "heading" ||
-                  selected.type === "paragraph" ||
-                  selected.type === "button" ||
-                  selected.type === "logo" ||
-                  selected.type === "menu" ||
-                  selected.type === "social" ||
-                  selected.type === "icon") && (
-                  <div className="inspector-section">
-                    <h4>Content</h4>
-
-                    <textarea
-                      value={selected.content || ""}
-                      onChange={(event) =>
-                        changeContent(event.target.value)
-                      }
-                    />
-                  </div>
-                )}
-
-                {inspectorTab === "design" && (
-                  <>
-                    {selected.type !== "section" && (
-                      <div className="inspector-section">
-                        <h4>Typography</h4>
-
-                        <label>
-                          Font size
-                          <input
-                            value={
-                              selected.responsive?.[
-                                breakpoint
-                              ]?.fontSize ||
-                              selected.style?.fontSize ||
-                              ""
-                            }
-                            onChange={(event) =>
-                              changeResponsiveStyle(
-                                "fontSize",
-                                event.target.value
-                              )
-                            }
-                            placeholder="18px"
-                          />
-                        </label>
-
-                        <label>
-                          Weight
-                          <select
-                            value={
-                              selected.style
-                                ?.fontWeight || "400"
-                            }
-                            onChange={(event) =>
-                              changeStyle(
-                                "fontWeight",
-                                event.target.value
-                              )
-                            }
-                          >
-                            <option value="400">
-                              Regular
-                            </option>
-                            <option value="500">
-                              Medium
-                            </option>
-                            <option value="600">
-                              Semibold
-                            </option>
-                            <option value="700">
-                              Bold
-                            </option>
-                          </select>
-                        </label>
-
-                        <label>
-                          Text align
-                          <select
-                            value={
-                              selected.style?.textAlign ||
-                              "left"
-                            }
-                            onChange={(event) =>
-                              changeStyle(
-                                "textAlign",
-                                event.target.value
-                              )
-                            }
-                          >
-                            <option value="left">
-                              Left
-                            </option>
-                            <option value="center">
-                              Center
-                            </option>
-                            <option value="right">
-                              Right
-                            </option>
-                          </select>
-                        </label>
-
-                        <label>
-                          Color
-                          <input
-                            value={
-                              selected.style?.color || ""
-                            }
-                            onChange={(event) =>
-                              changeStyle(
-                                "color",
-                                event.target.value
-                              )
-                            }
-                            placeholder="#111111"
-                          />
-                        </label>
-                      </div>
-                    )}
-
-                    <div className="inspector-section">
-                      <h4>Appearance</h4>
-
-                      <label>
-                        Background
-                        <input
-                          value={
-                            selected.style?.background ||
-                            ""
-                          }
-                          onChange={(event) =>
-                            changeStyle(
-                              "background",
-                              event.target.value
-                            )
-                          }
-                          placeholder="#ffffff"
-                        />
-                      </label>
-
-                      <label>
-                        Border
-                        <input
-                          value={
-                            selected.style?.border || ""
-                          }
-                          onChange={(event) =>
-                            changeStyle(
-                              "border",
-                              event.target.value
-                            )
-                          }
-                          placeholder="1px solid #ddd"
-                        />
-                      </label>
-
-                      <label>
-                        Radius
-                        <input
-                          value={
-                            selected.style
-                              ?.borderRadius || ""
-                          }
-                          onChange={(event) =>
-                            changeStyle(
-                              "borderRadius",
-                              event.target.value
-                            )
-                          }
-                          placeholder="8px"
-                        />
-                      </label>
-
-                      <label>
-                        Shadow
-                        <input
-                          value={
-                            selected.style
-                              ?.boxShadow || ""
-                          }
-                          onChange={(event) =>
-                            changeStyle(
-                              "boxShadow",
-                              event.target.value
-                            )
-                          }
-                          placeholder="0 8px 30px #0001"
-                        />
-                      </label>
-                    </div>
-
-                    <div className="inspector-section">
-                      <h4>Link</h4>
-
-                      <input
-                        value={selected.href || ""}
-                        onChange={(event) => {
-                          const value =
-                            event.target.value;
-
-                          mutatePage((current) => ({
-                            ...current,
-                            components:
-                              updateNode(
-                                current.components,
-                                selected.id,
-                                (node) => ({
-                                  ...node,
-                                  href: value
-                                })
-                              )
-                          }));
-                        }}
-                        placeholder="/about or https://..."
-                      />
-                    </div>
-                  </>
-                )}
-
-                {inspectorTab === "layout" && (
-                  <>
-                    <div className="inspector-section">
-                      <h4>Size</h4>
-
-                      <label>
-                        Width
-                        <input
-                          value={
-                            selected.style?.width || ""
-                          }
-                          onChange={(event) =>
-                            changeResponsiveStyle(
-                              "width",
-                              event.target.value
-                            )
-                          }
-                          placeholder="100%"
-                        />
-                      </label>
-
-                      <label>
-                        Height
-                        <input
-                          value={
-                            selected.style?.height || ""
-                          }
-                          onChange={(event) =>
-                            changeResponsiveStyle(
-                              "height",
-                              event.target.value
-                            )
-                          }
-                          placeholder="auto"
-                        />
-                      </label>
-                    </div>
-
-                    <div className="inspector-section">
-                      <h4>Spacing</h4>
-
-                      {(
-                        [
-                          "paddingTop",
-                          "paddingRight",
-                          "paddingBottom",
-                          "paddingLeft",
-                          "gap"
-                        ] as (keyof NodeStyle)[]
-                      ).map((key) => (
-                        <label key={key}>
-                          {key
-                            .replace("padding", "Padding ")
-                            .replace(
-                              "paddingTop",
-                              "Padding top"
-                            )
-                            .replace(
-                              "paddingRight",
-                              "Padding right"
-                            )
-                            .replace(
-                              "paddingBottom",
-                              "Padding bottom"
-                            )
-                            .replace(
-                              "paddingLeft",
-                              "Padding left"
-                            )
-                            .replace("gap", "Gap")}
-                          <input
-                            value={
-                              selected.style?.[key] || ""
-                            }
-                            onChange={(event) =>
-                              changeResponsiveStyle(
-                                key,
-                                event.target.value
-                              )
-                            }
-                            placeholder="24px"
-                          />
-                        </label>
-                      ))}
-                    </div>
-
-                    <div className="inspector-section">
-                      <h4>Alignment</h4>
-
-                      <label>
-                        Horizontal
-                        <select
-                          value={
-                            selected.style
-                              ?.alignSelf || "stretch"
-                          }
-                          onChange={(event) =>
-                            changeStyle(
-                              "alignSelf",
-                              event.target.value
-                            )
-                          }
-                        >
-                          <option value="left">
-                            Left
-                          </option>
-                          <option value="center">
-                            Center
-                          </option>
-                          <option value="right">
-                            Right
-                          </option>
-                          <option value="stretch">
-                            Stretch
-                          </option>
-                        </select>
-                      </label>
-
-                      {selected.type === "section" && (
-                        <label>
-                          Vertical
-                          <select
-                            value={
-                              selected.style
-                                ?.verticalAlign ||
-                              "top"
-                            }
-                            onChange={(event) =>
-                              changeStyle(
-                                "verticalAlign",
-                                event.target.value
-                              )
-                            }
-                          >
-                            <option value="top">
-                              Top
-                            </option>
-                            <option value="center">
-                              Center
-                            </option>
-                            <option value="bottom">
-                              Bottom
-                            </option>
-                          </select>
-                        </label>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {inspectorTab === "position" && (
-                  <div className="inspector-section">
-                    <h4>Position</h4>
-
-                    <label>
-                      Position
-                      <select
-                        value={
-                          selected.style?.position ||
-                          "relative"
-                        }
-                        onChange={(event) =>
-                          changeStyle(
-                            "position",
-                            event.target.value
-                          )
-                        }
-                      >
-                        <option value="relative">
-                          Normal
-                        </option>
-                        <option value="absolute">
-                          Absolute
-                        </option>
-                      </select>
-                    </label>
-
-                    {selected.style?.position ===
-                      "absolute" && (
-                      <>
-                        <label>
-                          Left
-                          <input
-                            value={
-                              selected.style?.left || ""
-                            }
-                            onChange={(event) =>
-                              changeResponsiveStyle(
-                                "left",
-                                event.target.value
-                              )
-                            }
-                          />
-                        </label>
-
-                        <label>
-                          Top
-                          <input
-                            value={
-                              selected.style?.top || ""
-                            }
-                            onChange={(event) =>
-                              changeResponsiveStyle(
-                                "top",
-                                event.target.value
-                              )
-                            }
-                          />
-                        </label>
-                      </>
-                    )}
-
-                    {selected.type === "group" && (
-                      <button onClick={ungroup}>
-                        Ungroup
-                      </button>
-                    )}
-                  </div>
-                )}
-              </>
+            {pageSelected ? (
+              <PageInspector
+                site={activeSite}
+                page={activePage}
+                updateSite={updateSite}
+                updatePage={
+                  updatePage
+                }
+                updateTheme={
+                  updateTheme
+                }
+              />
+            ) : selectedNode ? (
+              <NodeInspector
+                node={selectedNode}
+                tab={inspectorTab}
+                updateStyle={
+                  updateNodeStyle
+                }
+                updateProp={
+                  updateNodeProp
+                }
+                onDelete={
+                  deleteSelected
+                }
+              />
             ) : (
-              <>
-                <div className="selection-title">
-                  <strong>Page Inspector</strong>
-                  <small>{page.name}</small>
-                </div>
+              <div className="inspector-empty">
+                Select an element.
+              </div>
+            )}
+          </aside>
+        )}
 
-                <div className="inspector-section">
-                  <h4>Page settings</h4>
+        <aside className="right-rail">
+          {(
+            [
+              "design",
+              "layout",
+              "position"
+            ] as InspectorTab[]
+          ).map((item) => (
+            <button
+              key={item}
+              className={
+                inspectorTab === item
+                  ? "active"
+                  : ""
+              }
+              onPointerDown={(event) =>
+                event.stopPropagation()
+              }
+              onClick={(event) => {
+                event.stopPropagation();
+                setInspectorTab(item);
+                setRightOpen(true);
+              }}
+            >
+              <span>
+                {item === "design"
+                  ? "◈"
+                  : item === "layout"
+                    ? "▤"
+                    : "↔"}
+              </span>
+              {item[0].toUpperCase() +
+                item.slice(1)}
+            </button>
+          ))}
 
-                  <label>
-                    Page name
-                    <input
-                      value={page.name}
-                      onChange={(event) => {
-                        const value = event.target.value;
+          <button
+            className="rail-collapse"
+            onClick={() =>
+              setRightOpen(
+                (current) => !current
+              )
+            }
+          >
+            {rightOpen ? "›" : "‹"}
+          </button>
+        </aside>
+      </div>
+    </div>
+  );
+}
 
-                        mutatePage((current) => ({
-                          ...current,
-                          name: value
-                        }));
-                      }}
-                    />
-                  </label>
+function PageInspector({
+  site,
+  page,
+  updateSite,
+  updatePage,
+  updateTheme
+}: {
+  site: Site;
+  page: SitePage;
+  updateSite: (
+    updater: (site: Site) => Site
+  ) => void;
+  updatePage: (
+    updater: (page: SitePage) => SitePage
+  ) => void;
+  updateTheme: (
+    theme: SiteTheme
+  ) => void;
+}) {
+  return (
+    <div className="inspector-body">
+      <div className="inspector-card">
+        <h4>Page design</h4>
 
-                  <label>
-                    URL slug
-                    <input
-                      value={page.settings.slug}
-                      onChange={(event) =>
-                        changePageSetting(
-                          "slug",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
+        <label>
+          Page name
+          <input
+            value={page.name}
+            onChange={(event) =>
+              updatePage(
+                (current) => ({
+                  ...current,
+                  name: event.target.value
+                })
+              )
+            }
+          />
+        </label>
 
-                  <label>
-                    SEO title
-                    <input
-                      value={
-                        page.settings.seoTitle || ""
-                      }
-                      onChange={(event) =>
-                        changePageSetting(
-                          "seoTitle",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
+        <label>
+          URL slug
+          <input
+            value={page.slug}
+            onChange={(event) =>
+              updatePage(
+                (current) => ({
+                  ...current,
+                  slug: event.target.value
+                })
+              )
+            }
+          />
+        </label>
 
-                  <label>
-                    SEO description
-                    <textarea
-                      value={
-                        page.settings.seoDescription || ""
-                      }
-                      onChange={(event) =>
-                        changePageSetting(
-                          "seoDescription",
-                          event.target.value
-                        )
-                      }
-                    />
-                  </label>
+        <label>
+          Background
+          <input
+            value={String(
+              page.styles
+                ?.background ??
+                "#fff"
+            )}
+            onChange={(event) =>
+              updatePage(
+                (current) => ({
+                  ...current,
+                  styles: {
+                    ...(current.styles ??
+                      {}),
+                    background:
+                      event.target
+                        .value
+                  }
+                })
+              )
+            }
+          />
+        </label>
+      </div>
 
-                  <label className="checkbox-row">
-                    <input
-                      type="checkbox"
-                      checked={
-                        page.settings.noIndex || false
-                      }
-                      onChange={(event) =>
-                        changePageSetting(
-                          "noIndex",
-                          event.target.checked
-                        )
-                      }
-                    />
-                    Hide from search engines
-                  </label>
-                </div>
+      <div className="inspector-card">
+        <h4>Website appearance</h4>
 
-                <div className="inspector-section">
-                  <h4>Site</h4>
+        <label>
+          Color mode
+          <select
+            value={site.theme}
+            onChange={(event) =>
+              updateTheme(
+                event.target
+                  .value as SiteTheme
+              )
+            }
+          >
+            <option value="system">
+              System
+            </option>
+            <option value="light">
+              Light
+            </option>
+            <option value="dark">
+              Dark
+            </option>
+          </select>
+        </label>
 
-                  <label>
-                    Site name
-                    <input
-                      value={site.name}
-                      onChange={(event) => {
-                        const next = clone(site);
-                        next.name =
-                          event.target.value;
-                        commit(next);
-                      }}
-                    />
-                  </label>
+        <p className="inspector-help">
+          System follows the visitor's
+          device preference. This setting
+          applies to the website, not the
+          editor chrome.
+        </p>
+      </div>
 
-                  <label>
-                    Primary color
-                    <input
-                      value={
-                        site.theme.primaryColor
-                      }
-                      onChange={(event) => {
-                        const next = clone(site);
-                        next.theme.primaryColor =
-                          event.target.value;
-                        commit(next);
-                      }}
-                    />
-                  </label>
-                </div>
-              </>
+      <div className="inspector-card">
+        <h4>Page spacing</h4>
+
+        {(
+          [
+            "top",
+            "right",
+            "bottom",
+            "left"
+          ] as const
+        ).map((key) => (
+          <label key={key}>
+            {key}
+            <input
+              type="number"
+              value={page.margins[key]}
+              onChange={(event) =>
+                updatePage(
+                  (current) => ({
+                    ...current,
+                    margins: {
+                      ...current.margins,
+                      [key]: Number(
+                        event.target
+                          .value
+                      )
+                    }
+                  })
+                )
+              }
+            />
+          </label>
+        ))}
+      </div>
+
+      <div className="inspector-card">
+        <h4>Website</h4>
+
+        <label>
+          Website name
+          <input
+            value={site.name}
+            onChange={(event) =>
+              updateSite((current) => ({
+                ...current,
+                name: event.target.value
+              }))
+            }
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function NodeInspector({
+  node,
+  tab,
+  updateStyle,
+  updateProp,
+  onDelete
+}: {
+  node: ComponentNode;
+  tab: InspectorTab;
+  updateStyle: (
+    key: string,
+    value: unknown
+  ) => void;
+  updateProp: (
+    key: string,
+    value: unknown
+  ) => void;
+  onDelete: () => void;
+}) {
+  const styles = node.styles ?? {};
+
+  return (
+    <div className="inspector-body">
+      <div className="inspector-card readonly">
+        <h4>Element</h4>
+
+        <div className="readonly-row">
+          <span>Type</span>
+          <b>{node.type}</b>
+        </div>
+      </div>
+
+      {tab === "design" && (
+        <>
+          {(node.type ===
+            "heading" ||
+            node.type === "text" ||
+            node.type ===
+              "button") && (
+            <div className="inspector-card">
+              <h4>Content</h4>
+
+              <label>
+                Text
+                {node.type ===
+                "text" ||
+                node.type ===
+                  "heading" ? (
+                  <textarea
+                    value={String(
+                      node.props
+                        .text ?? ""
+                    )}
+                    onChange={(event) =>
+                      updateProp(
+                        "text",
+                        event.target
+                          .value
+                      )
+                    }
+                  />
+                ) : (
+                  <input
+                    value={String(
+                      node.props
+                        .text ?? ""
+                    )}
+                    onChange={(event) =>
+                      updateProp(
+                        "text",
+                        event.target
+                          .value
+                      )
+                    }
+                  />
+                )}
+              </label>
+            </div>
+          )}
+
+          <div className="inspector-card">
+            <h4>Appearance</h4>
+
+            <label>
+              Background
+              <input
+                value={String(
+                  styles.background ??
+                    ""
+                )}
+                onChange={(event) =>
+                  updateStyle(
+                    "background",
+                    event.target.value
+                  )
+                }
+              />
+            </label>
+
+            <label>
+              Border radius
+              <input
+                type="number"
+                value={Number(
+                  styles.borderRadius ??
+                    0
+                )}
+                onChange={(event) =>
+                  updateStyle(
+                    "borderRadius",
+                    Number(
+                      event.target
+                        .value
+                    )
+                  )
+                }
+              />
+            </label>
+
+            {node.type !==
+              "section" && (
+              <label>
+                Color
+                <input
+                  value={String(
+                    styles.color ??
+                      ""
+                  )}
+                  onChange={(event) =>
+                    updateStyle(
+                      "color",
+                      event.target
+                        .value
+                    )
+                  }
+                />
+              </label>
             )}
           </div>
-        </aside>
+
+          {(node.type ===
+            "heading" ||
+            node.type ===
+              "text" ||
+            node.type ===
+              "button") && (
+            <div className="inspector-card">
+              <h4>Typography</h4>
+
+              <label>
+                Font size
+                <input
+                  type="number"
+                  value={Number(
+                    styles.fontSize ??
+                      (node.type ===
+                      "heading"
+                        ? 32
+                        : 16)
+                  )}
+                  onChange={(event) =>
+                    updateStyle(
+                      "fontSize",
+                      Number(
+                        event.target
+                          .value
+                      )
+                    )
+                  }
+                />
+              </label>
+
+              <label>
+                Text align
+                <select
+                  value={String(
+                    styles.textAlign ??
+                      "left"
+                  )}
+                  onChange={(event) =>
+                    updateStyle(
+                      "textAlign",
+                      event.target
+                        .value
+                    )
+                  }
+                >
+                  <option value="left">
+                    Left
+                  </option>
+                  <option value="center">
+                    Center
+                  </option>
+                  <option value="right">
+                    Right
+                  </option>
+                </select>
+              </label>
+            </div>
+          )}
+        </>
+      )}
+
+      {tab === "layout" && (
+        <>
+          <div className="inspector-card">
+            <h4>Size</h4>
+
+            <label>
+              Width
+              <input
+                value={String(
+                  styles.width ?? ""
+                )}
+                onChange={(event) =>
+                  updateStyle(
+                    "width",
+                    event.target.value
+                  )
+                }
+              />
+            </label>
+
+            <label>
+              Height
+              <input
+                value={String(
+                  styles.height ?? ""
+                )}
+                onChange={(event) =>
+                  updateStyle(
+                    "height",
+                    event.target.value
+                  )
+                }
+              />
+            </label>
+          </div>
+
+          <div className="inspector-card">
+            <h4>Alignment</h4>
+
+            <div className="alignment-grid">
+              <button
+                type="button"
+                onPointerDown={(event) =>
+                  event.stopPropagation()
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateStyle(
+                    "alignItems",
+                    "flex-start"
+                  );
+                }}
+              >
+                ←
+              </button>
+
+              <button
+                type="button"
+                onPointerDown={(event) =>
+                  event.stopPropagation()
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateStyle(
+                    "alignItems",
+                    "center"
+                  );
+                }}
+              >
+                ↔
+              </button>
+
+              <button
+                type="button"
+                onPointerDown={(event) =>
+                  event.stopPropagation()
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateStyle(
+                    "alignItems",
+                    "flex-end"
+                  );
+                }}
+              >
+                →
+              </button>
+
+              <button
+                type="button"
+                onPointerDown={(event) =>
+                  event.stopPropagation()
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateStyle(
+                    "justifyContent",
+                    "flex-start"
+                  );
+                }}
+              >
+                ↑
+              </button>
+
+              <button
+                type="button"
+                onPointerDown={(event) =>
+                  event.stopPropagation()
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateStyle(
+                    "justifyContent",
+                    "center"
+                  );
+                }}
+              >
+                ↕
+              </button>
+
+              <button
+                type="button"
+                onPointerDown={(event) =>
+                  event.stopPropagation()
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  updateStyle(
+                    "justifyContent",
+                    "flex-end"
+                  );
+                }}
+              >
+                ↓
+              </button>
+            </div>
+          </div>
+
+          <div className="inspector-card">
+            <h4>Spacing</h4>
+
+            <label>
+              Gap
+              <input
+                type="number"
+                value={Number(
+                  styles.gap ?? 20
+                )}
+                onChange={(event) =>
+                  updateStyle(
+                    "gap",
+                    Number(
+                      event.target.value
+                    )
+                  )
+                }
+              />
+            </label>
+
+            <label>
+              Padding
+              <input
+                value={String(
+                  styles.padding ?? ""
+                )}
+                onChange={(event) =>
+                  updateStyle(
+                    "padding",
+                    event.target.value
+                  )
+                }
+              />
+            </label>
+          </div>
+        </>
+      )}
+
+      {tab === "position" && (
+        <div className="inspector-card">
+          <h4>Position</h4>
+
+          <label>
+            Position
+            <select
+              value={String(
+                styles.position ??
+                  "relative"
+              )}
+              onChange={(event) =>
+                updateStyle(
+                  "position",
+                  event.target.value
+                )
+              }
+            >
+              <option value="relative">
+                Relative
+              </option>
+              <option value="absolute">
+                Absolute
+              </option>
+            </select>
+          </label>
+
+          <label>
+            Top
+            <input
+              value={String(
+                styles.top ?? ""
+              )}
+              onChange={(event) =>
+                updateStyle(
+                  "top",
+                  event.target.value
+                )
+              }
+            />
+          </label>
+
+          <label>
+            Left
+            <input
+              value={String(
+                styles.left ?? ""
+              )}
+              onChange={(event) =>
+                updateStyle(
+                  "left",
+                  event.target.value
+                )
+              }
+            />
+          </label>
+        </div>
+      )}
+
+      <div className="inspector-card">
+        <button
+          className="danger-button"
+          onClick={onDelete}
+        >
+          Delete element
+        </button>
       </div>
     </div>
   );
