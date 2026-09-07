@@ -15,42 +15,40 @@ const KEY =
 const LEGACY =
   "sytely-site";
 
-const makeId = () =>
+const slugify = (
+  value: string
+) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(
+      /[^a-z0-9]+/g,
+      "-"
+    )
+    .replace(
+      /^-+|-+$/g,
+      "") ||
+  "website";
+
+const uid = () =>
   typeof crypto !==
     "undefined" &&
   crypto.randomUUID
     ? crypto.randomUUID()
     : `site-${Date.now()}`;
 
-const slugify = (value: string) =>
-  value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") ||
-  "website";
-
-function starter(
-  name: string
-): Site {
-  const siteId =
-    makeId();
-
-  const pageId =
-    makeId();
-
-  const sectionId =
-    makeId();
-
+function starter(): Site {
   return {
-    id: siteId,
-    name,
-    slug: slugify(name),
+    id: uid(),
+    name: "My Website",
+    slug: `my-website-${Date.now().toString(
+      36
+    )}`,
     version: 1,
     theme: "system",
     pages: [
       {
-        id: pageId,
+        id: uid(),
         name: "Home",
         slug: "/",
         margins: {
@@ -59,104 +57,10 @@ function starter(
           bottom: 0,
           left: 32,
         },
-        styles: {
-          background:
-            "var(--sytely-page)",
-        },
-        components: [
-          {
-            id: sectionId,
-            type: "section",
-            props: {},
-            styles: {
-              display: "flex",
-              flexDirection:
-                "column",
-              gap: 20,
-              padding:
-                "72px 48px",
-              background:
-                "var(--sytely-surface)",
-            },
-            children: [
-              {
-                id: makeId(),
-                type: "heading",
-                props: {
-                  text: name,
-                },
-                styles: {
-                  fontSize: 52,
-                  fontWeight: 750,
-                  maxWidth: 760,
-                },
-              },
-              {
-                id: makeId(),
-                type: "text",
-                props: {
-                  text:
-                    "Build and publish a polished responsive website with Sytely.",
-                },
-                styles: {
-                  fontSize: 18,
-                  maxWidth: 650,
-                },
-              },
-              {
-                id: makeId(),
-                type: "button",
-                props: {
-                  text:
-                    "Get started",
-                  linkTo: "#",
-                },
-                styles: {},
-              },
-            ],
-          },
-        ],
+        components: [],
       },
     ],
   };
-}
-
-function readSites(): Site[] {
-  try {
-    const raw =
-      localStorage.getItem(
-        KEY
-      );
-
-    if (raw) {
-      const parsed =
-        JSON.parse(raw);
-
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    }
-
-    const legacy =
-      localStorage.getItem(
-        LEGACY
-      );
-
-    if (legacy) {
-      const parsed =
-        JSON.parse(legacy);
-
-      if (parsed) {
-        return [parsed];
-      }
-    }
-  } catch {
-    // Ignore malformed storage.
-  }
-
-  return [
-    starter("My Website"),
-  ];
 }
 
 export default function MySitesPage() {
@@ -164,40 +68,53 @@ export default function MySitesPage() {
     useState<Site[]>([]);
 
   useEffect(() => {
-    const loaded =
-      readSites();
+    try {
+      const raw =
+        localStorage.getItem(
+          KEY
+        );
 
-    setSites(loaded);
+      if (raw) {
+        const parsed: unknown =
+          JSON.parse(raw);
 
-    localStorage.setItem(
-      KEY,
-      JSON.stringify(loaded)
-    );
+        if (
+          Array.isArray(parsed)
+        ) {
+          setSites(
+            parsed as Site[]
+          );
+          return;
+        }
+      }
+
+      const legacy =
+        localStorage.getItem(
+          LEGACY
+        );
+
+      if (legacy) {
+        const parsed: unknown =
+          JSON.parse(legacy);
+
+        if (
+          parsed &&
+          typeof parsed ===
+            "object"
+        ) {
+          setSites([
+            parsed as Site,
+          ]);
+        }
+      }
+    } catch {
+      setSites([]);
+    }
   }, []);
 
-  const create = () => {
-    const name =
-      window
-        .prompt(
-          "Website name",
-          `Website ${
-            sites.length + 1
-          }`
-        )
-        ?.trim();
-
-    if (!name) {
-      return;
-    }
-
-    const site =
-      starter(name);
-
-    const next = [
-      ...sites,
-      site,
-    ];
-
+  const persist = (
+    next: Site[]
+  ) => {
     setSites(next);
 
     localStorage.setItem(
@@ -206,142 +123,136 @@ export default function MySitesPage() {
     );
   };
 
+  const create = () => {
+    const site =
+      starter();
+
+    persist([
+      ...sites,
+      site,
+    ]);
+
+    window.location.href =
+      `/${site.slug}/editor`;
+  };
+
   const remove = (
-    site: Site
+    id: string
   ) => {
     if (
       !window.confirm(
-        `Delete “${site.name}”?`
+        "Delete this website?"
       )
     ) {
       return;
     }
 
-    const next =
+    persist(
       sites.filter(
-        item =>
-          item.id !== site.id
-      );
-
-    setSites(next);
-
-    localStorage.setItem(
-      KEY,
-      JSON.stringify(next)
+        (site) =>
+          site.id !== id
+      )
     );
   };
 
   return (
-    <main className="mysites-page">
-      <header className="mysites-header">
-        <a
-          className="mysites-brand"
-          href="/"
-        >
-          <span>S</span>
-          Sytely
-        </a>
+    <main className="mysites">
+      <header>
+        <div>
+          <span>
+            Sytely
+          </span>
+
+          <h1>
+            My websites
+          </h1>
+
+          <p>
+            Choose a website to
+            edit.
+          </p>
+        </div>
 
         <button
-          className="mysites-create"
+          type="button"
           onClick={create}
         >
-          + New website
+          New website
         </button>
       </header>
 
-      <section className="mysites-content">
-        <div className="mysites-intro">
-          <div>
-            <p>
-              WORKSPACE
-            </p>
-
-            <h1>
-              Your websites
-            </h1>
-
-            <span>
-              Open a site to edit it
-              visually.
-            </span>
-          </div>
-
-          <strong>
-            {sites.length} site
-            {sites.length ===
-            1
-              ? ""
-              : "s"}
-          </strong>
-        </div>
-
-        <div className="site-grid">
-          {sites.map(site => (
+      <section className="site-grid">
+        {sites.map(
+          (site) => (
             <article
-              className="site-card"
               key={site.id}
             >
-              <a
-                href={`/${
-                  site.slug ||
-                  slugify(
-                    site.name
-                  )
-                }/editor`}
-                className="site-card-open"
-              >
-                <div className="site-preview">
-                  <div className="preview-line" />
+              <div className="site-preview">
+                <div className="preview-bars" />
+                <div className="preview-lines" />
+                <div className="preview-card" />
+              </div>
 
-                  <div className="preview-boxes">
-                    <i />
-                    <i />
-                    <i />
-                  </div>
-
-                  <div className="preview-line short" />
-                </div>
-
-                <div className="site-card-info">
-                  <h2>
+              <div className="site-meta">
+                <div>
+                  <strong>
                     {site.name}
-                  </h2>
+                  </strong>
 
-                  <span>
+                  <small>
                     /
                     {site.slug ||
                       slugify(
                         site.name
                       )}
-                  </span>
+                  </small>
                 </div>
-              </a>
 
-              <button
-                className="site-delete"
-                onClick={() =>
-                  remove(site)
-                }
-              >
-                ×
-              </button>
+                <div>
+                  <a
+                    href={`/${
+                      site.slug ||
+                      slugify(
+                        site.name
+                      )
+                    }/editor`}
+                  >
+                    Open
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      remove(
+                        site.id
+                      )
+                    }
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
             </article>
-          ))}
+          )
+        )}
 
-          <button
-            className="new-site-card"
-            onClick={create}
-          >
-            <span>+</span>
+        {!sites.length && (
+          <div className="empty">
             <strong>
-              Create website
+              No websites yet.
             </strong>
-            <small>
-              Start from a blank site
-            </small>
-          </button>
-        </div>
+
+            <button
+              type="button"
+              onClick={
+                create
+              }
+            >
+              Create your first
+              website
+            </button>
+          </div>
+        )}
       </section>
     </main>
   );

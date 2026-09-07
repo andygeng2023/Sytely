@@ -1,8 +1,12 @@
 import {
-  createElement,
   Fragment,
+  createElement,
   type CSSProperties,
   type ReactNode,
+  type DragEventHandler,
+  type MouseEvent as ReactMouseEvent,
+  type DragEvent as ReactDragEvent,
+  type FormEvent,
 } from "react";
 
 import type {
@@ -16,209 +20,297 @@ export type RenderDevice =
 
 export interface RenderOptions {
   device?: RenderDevice;
-  children?: ReactNode;
-  renderChildren?: boolean;
+  editable?: boolean;
+  selectedIds?: string[];
+  onNodeClick?: (
+    id: string,
+    event: ReactMouseEvent
+  ) => void;
+  onNodeDragStart?: DragEventHandler<HTMLElement>;
 }
 
-type AnyStyle =
-  Record<string, unknown>;
-
-function getString(
+function stringValue(
   props: Record<string, unknown>,
   key: string,
   fallback = ""
 ) {
-  return typeof props[key] === "string"
-    ? (props[key] as string)
+  const value = props[key];
+
+  return typeof value === "string"
+    ? value
     : fallback;
 }
 
-function getNumber(
-  value: unknown,
+function numberValue(
+  props: Record<string, unknown>,
+  key: string,
   fallback: number
 ) {
-  if (
-    typeof value === "number" &&
+  const value = props[key];
+
+  return typeof value === "number" &&
     Number.isFinite(value)
-  ) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return fallback;
-}
-
-function data(
-  node: ComponentNode
-) {
-  return {
-    "data-sytely-id": node.id,
-    "data-sytely-type": node.type,
-  };
+    ? value
+    : fallback;
 }
 
 function responsiveStyles(
   node: ComponentNode,
   device: RenderDevice
 ): CSSProperties {
-  const base: AnyStyle = {
+  const source = {
     ...(node.styles ?? {}),
-  };
+  } as Record<string, unknown>;
 
-  const responsive =
-    (base.responsive ?? {}) as AnyStyle;
+  const responsive = source.responsive;
 
-  delete base.responsive;
+  delete source.responsive;
 
   const tablet =
-    (responsive.tablet ?? {}) as AnyStyle;
+    responsive &&
+    typeof responsive === "object"
+      ? ((responsive as Record<string, unknown>)
+          .tablet as
+          | Record<string, unknown>
+          | undefined) ?? {}
+      : {};
 
   const mobile =
-    (responsive.mobile ?? {}) as AnyStyle;
+    responsive &&
+    typeof responsive === "object"
+      ? ((responsive as Record<string, unknown>)
+          .mobile as
+          | Record<string, unknown>
+          | undefined) ?? {}
+      : {};
 
-  const override =
-    device === "tablet"
+  const merged = {
+    ...source,
+    ...(device === "tablet"
       ? tablet
       : device === "mobile"
         ? {
             ...tablet,
             ...mobile,
           }
-        : {};
-
-  const result: AnyStyle = {
-    ...base,
-    ...override,
-  };
+        : {}),
+  } as CSSProperties;
 
   if (
-    typeof result.width === "number"
+    typeof merged.width ===
+    "number"
   ) {
-    result.width =
-      `min(${result.width}px,100%)`;
+    merged.width = `min(${merged.width}px, 100%)`;
   }
 
   if (
-    typeof result.maxWidth === "number"
+    typeof merged.maxWidth ===
+    "number"
   ) {
-    result.maxWidth =
-      `min(${result.maxWidth}px,100%)`;
+    merged.maxWidth = `min(${merged.maxWidth}px, 100%)`;
   }
 
   if (
-    typeof result.fontSize === "number" &&
-    device !== "desktop"
+    device !== "desktop" &&
+    typeof merged.fontSize ===
+      "number"
   ) {
-    result.fontSize = Math.max(
-      10,
-      result.fontSize *
+    merged.fontSize = Math.max(
+      12,
+      merged.fontSize *
         (device === "mobile"
-          ? 0.72
-          : 0.88)
+          ? 0.76
+          : 0.9)
     );
   }
 
   if (
-    typeof result.gap === "number" &&
-    device !== "desktop"
+    device !== "desktop" &&
+    typeof merged.gap ===
+      "number"
   ) {
-    result.gap = Math.max(
+    merged.gap = Math.max(
       6,
-      result.gap *
+      merged.gap *
         (device === "mobile"
           ? 0.75
           : 0.9)
     );
   }
 
-  const gridColumns =
-    result.gridTemplateColumns;
+  const columns =
+    typeof merged.gridTemplateColumns ===
+    "string"
+      ? merged.gridTemplateColumns
+      : "";
 
   if (
-    typeof gridColumns === "string"
+    device === "tablet" &&
+    columns.includes("repeat(3")
   ) {
-    if (
-      device === "tablet" &&
-      gridColumns.includes("repeat(3")
-    ) {
-      result.gridTemplateColumns =
-        "repeat(2,minmax(0,1fr))";
-    }
-
-    if (
-      device === "mobile" &&
-      gridColumns.includes("repeat(")
-    ) {
-      result.gridTemplateColumns =
-        "1fr";
-    }
+    merged.gridTemplateColumns =
+      "repeat(2,minmax(0,1fr))";
   }
 
   if (
     device === "mobile" &&
-    result.flexDirection === "row"
+    columns.includes("repeat(")
   ) {
-    result.flexDirection = "column";
+    merged.gridTemplateColumns =
+      "1fr";
   }
 
-  return result as CSSProperties;
+  if (
+    device === "mobile" &&
+    merged.flexDirection === "row"
+  ) {
+    merged.flexDirection = "column";
+  }
+
+  return merged;
 }
 
-function renderChildren(
-  children: ComponentNode[] | undefined,
-  device: RenderDevice
-): ReactNode {
-  return (children ?? []).map(
-    (child) =>
-      createElement(
-        Fragment,
-        {
-          key: child.id,
-        },
-        renderNode(child, {
-          device,
-        })
-      )
-  );
-}
-
-function renderCompositeChildren(
+function attrs(
   node: ComponentNode,
-  device: RenderDevice,
-  fallback: ComponentNode[]
-): ReactNode {
-  const children =
-    node.children?.length
-      ? node.children
-      : fallback;
+  options: RenderOptions
+): Record<string, unknown> {
+  const selected =
+    options.selectedIds?.includes(
+      node.id
+    ) ?? false;
 
-  return children.map(
-    (child) =>
-      createElement(
-        Fragment,
-        {
-          key: child.id,
-        },
-        renderNode(child, {
-          device,
-        })
-      )
+  const result: Record<
+    string,
+    unknown
+  > = {
+    "data-sytely-id": node.id,
+    "data-sytely-type": node.type,
+  };
+
+  if (options.editable) {
+    result[
+      "data-sytely-editable"
+    ] = "true";
+
+    result[
+      "aria-selected"
+    ] = selected;
+
+    result.onClick = (
+      event: ReactMouseEvent
+    ) => {
+      options.onNodeClick?.(
+        node.id,
+        event
+      );
+    };
+
+    result.onDragStart = (
+      event: ReactDragEvent<HTMLElement>
+    ) => {
+      event.stopPropagation();
+      options.onNodeDragStart?.(
+        event
+      );
+    };
+
+    result.draggable = true;
+  }
+
+  return result;
+}
+
+function childNodes(
+  node: ComponentNode,
+  options: RenderOptions
+) {
+  return (
+    node.children ?? []
+  ).map((child) =>
+    createElement(
+      Fragment,
+      {
+        key: child.id,
+      },
+      renderNode(child, options)
+    )
   );
 }
+
+function link(
+  node: ComponentNode,
+  content: ReactNode
+) {
+  const href = stringValue(
+    node.props,
+    "linkTo"
+  );
+
+  if (!href) {
+    return content;
+  }
+
+  return createElement(
+    "a",
+    {
+      href,
+      style: {
+        color: "inherit",
+        textDecoration:
+          "none",
+      },
+    },
+    content
+  );
+}
+
+function cardFromChild(
+  child: ComponentNode,
+  options: RenderOptions
+) {
+  return renderNode(
+    child,
+    options
+  );
+}
+
+const buttonBase:
+  CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 44,
+  padding: "12px 20px",
+  border: 0,
+  borderRadius: 8,
+  background:
+    "var(--sytely-accent)",
+  color:
+    "var(--sytely-accent-text)",
+  cursor: "pointer",
+  boxSizing: "border-box",
+};
+
+const inputStyle:
+  CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "12px 14px",
+  borderRadius: 8,
+  border:
+    "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
+  background:
+    "var(--sytely-page)",
+  color: "inherit",
+};
 
 export function renderNode(
   node: ComponentNode,
   options: RenderOptions = {}
 ): ReactNode {
   const device =
-    options.device ?? "desktop";
+    options.device ??
+    "desktop";
 
   const props =
     node.props ?? {};
@@ -229,51 +321,28 @@ export function renderNode(
       device
     );
 
-  const children =
-    options.children !== undefined
-      ? options.children
-      : options.renderChildren === false
-        ? null
-        : renderChildren(
-            node.children,
-            device
-          );
+  const common =
+    attrs(node, options);
 
-  const linked = (
-    content: ReactNode
-  ) =>
-    getString(props, "linkTo")
-      ? createElement(
-          "a",
-          {
-            href: getString(
-              props,
-              "linkTo"
-            ),
-            style: {
-              color: "inherit",
-              textDecoration:
-                "none",
-            },
-          },
-          content
-        )
-      : content;
+  const children =
+    childNodes(
+      node,
+      options
+    );
 
   switch (node.type) {
     case "section":
       return createElement(
         "section",
         {
-          ...data(node),
+          ...common,
           style: {
-            boxSizing: "border-box",
+            boxSizing:
+              "border-box",
             width: "100%",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent:
-              "flex-start",
-            alignItems: "stretch",
+            display: "grid",
+            gridTemplateColumns:
+              "1fr",
             gap: 24,
             padding:
               "56px 40px",
@@ -288,20 +357,21 @@ export function renderNode(
       );
 
     case "heading":
-      return linked(
+      return link(
+        node,
         createElement(
           "h2",
           {
-            ...data(node),
+            ...common,
             style: {
               margin: 0,
+              lineHeight: 1.12,
               color:
                 "var(--sytely-text)",
-              lineHeight: 1.1,
               ...styles,
             },
           },
-          getString(
+          stringValue(
             props,
             "text",
             "Heading"
@@ -310,11 +380,12 @@ export function renderNode(
       );
 
     case "text":
-      return linked(
+      return link(
+        node,
         createElement(
           "p",
           {
-            ...data(node),
+            ...common,
             style: {
               margin: 0,
               lineHeight: 1.6,
@@ -323,7 +394,7 @@ export function renderNode(
               ...styles,
             },
           },
-          getString(
+          stringValue(
             props,
             "text",
             "Text"
@@ -331,50 +402,53 @@ export function renderNode(
         )
       );
 
-    case "button":
-      return createElement(
-        "a",
-        {
-          ...data(node),
-          href: getString(
-            props,
-            "linkTo",
-            "#"
-          ),
-          style: {
-            display:
-              "inline-flex",
-            alignItems:
-              "center",
-            justifyContent:
-              "center",
-            width: "fit-content",
-            minHeight: 44,
-            padding:
-              "12px 20px",
-            border: 0,
-            borderRadius: 9,
-            background:
-              "var(--sytely-accent)",
-            color:
-              "var(--sytely-accent-text)",
-            textDecoration:
-              "none",
-            boxSizing:
-              "border-box",
-            ...styles,
-          },
-        },
-        getString(
+    case "button": {
+      const text =
+        stringValue(
           props,
           "text",
           "Button"
-        )
+        );
+
+      const href =
+        stringValue(
+          props,
+          "linkTo"
+        );
+
+      const style: CSSProperties = {
+        ...buttonBase,
+        ...styles,
+        textDecoration:
+          "none",
+      };
+
+      if (href) {
+        return createElement(
+          "a",
+          {
+            ...common,
+            href,
+            style,
+          },
+          text
+        );
+      }
+
+      return createElement(
+        "button",
+        {
+          ...common,
+          type: "button",
+          style,
+        },
+        text
       );
+    }
 
     case "image": {
       const src =
-        getString(
+        stringValue(
           props,
           "src"
         );
@@ -383,16 +457,18 @@ export function renderNode(
         return createElement(
           "div",
           {
-            ...data(node),
+            ...common,
             style: {
+              minHeight: 180,
               width: "100%",
-              minHeight: 200,
+              aspectRatio:
+                "16 / 9",
               display: "grid",
               placeItems:
                 "center",
               borderRadius: 12,
               background:
-                "var(--sytely-placeholder)",
+                "repeating-linear-gradient(45deg,var(--sytely-placeholder-a) 0 8px,var(--sytely-placeholder-b) 8px 16px)",
               color:
                 "var(--sytely-text-muted)",
               ...styles,
@@ -405,9 +481,9 @@ export function renderNode(
       return createElement(
         "img",
         {
-          ...data(node),
+          ...common,
           src,
-          alt: getString(
+          alt: stringValue(
             props,
             "alt",
             "Image"
@@ -425,43 +501,43 @@ export function renderNode(
       );
     }
 
-    case "video":
+    case "video": {
+      const src =
+        stringValue(
+          props,
+          "src"
+        );
+
       return createElement(
         "div",
         {
-          ...data(node),
+          ...common,
           style: {
             width: "100%",
             aspectRatio:
               "16 / 9",
-            overflow:
-              "hidden",
             borderRadius: 12,
-            background:
-              "var(--sytely-card)",
-            display: "grid",
-            placeItems:
-              "center",
+            overflow: "hidden",
+            background: "#111",
             ...styles,
           },
         },
-        getString(props, "src")
+        src
           ? createElement(
               "video",
               {
-                src: getString(
-                  props,
-                  "src"
-                ),
+                src,
                 controls: true,
                 style: {
                   width: "100%",
                   height: "100%",
+                  display: "block",
                 },
               }
             )
           : "Video"
       );
+    }
 
     case "gallery": {
       const images =
@@ -477,18 +553,14 @@ export function renderNode(
             )
           : [];
 
-      const list =
-        images.length
-          ? images
-          : ["", "", ""];
-
       const columns =
         Math.max(
           1,
           Math.min(
             6,
-            getNumber(
-              props.columns,
+            numberValue(
+              props,
+              "columns",
               3
             )
           )
@@ -497,65 +569,73 @@ export function renderNode(
       return createElement(
         "div",
         {
-          ...data(node),
+          ...common,
           style: {
             display: "grid",
-            gridTemplateColumns:
-              `repeat(${columns},minmax(0,1fr))`,
-            gap: 12,
+            gridTemplateColumns: `repeat(${columns},minmax(0,1fr))`,
+            gap: 14,
             width: "100%",
             ...styles,
           },
         },
-        list.map(
-          (src, index) =>
-            src
-              ? createElement(
+        images.length
+          ? images.map(
+              (
+                src,
+                index
+              ) =>
+                createElement(
                   "img",
                   {
-                    key: index,
+                    key: `${src}-${index}`,
                     src,
-                    alt:
-                      `Gallery image ${index + 1}`,
+                    alt: `Gallery image ${
+                      index + 1
+                    }`,
                     style: {
-                      width:
-                        "100%",
+                      width: "100%",
                       aspectRatio:
-                        "1",
+                        "4 / 3",
                       objectFit:
                         "cover",
-                      borderRadius: 9,
+                      borderRadius: 10,
+                      display:
+                        "block",
                     },
                   }
                 )
-              : createElement(
-                  "div",
-                  {
-                    key: index,
-                    style: {
-                      aspectRatio:
-                        "1",
-                      borderRadius: 9,
-                      background:
-                        "var(--sytely-card)",
-                    },
-                  }
-                )
-        )
+            )
+          : createElement(
+              "div",
+              {
+                style: {
+                  gridColumn:
+                    "1 / -1",
+                  minHeight: 150,
+                  display: "grid",
+                  placeItems:
+                    "center",
+                  border:
+                    "1px dashed #bbb",
+                  borderRadius: 10,
+                },
+              },
+              "Gallery"
+            )
       );
     }
 
     case "divider":
       return createElement(
-        "div",
+        "hr",
         {
-          ...data(node),
+          ...common,
           style: {
             width: "100%",
-            height: 1,
-            background:
-              "currentColor",
-            opacity: 0.16,
+            border: 0,
+            borderTop:
+              "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
+            margin: 0,
             ...styles,
           },
         }
@@ -563,16 +643,16 @@ export function renderNode(
 
     case "icon":
       return createElement(
-        "div",
+        "span",
         {
-          ...data(node),
+          ...common,
           style: {
-            fontSize: 40,
-            lineHeight: 1,
+            display:
+              "inline-block",
             ...styles,
           },
         },
-        getString(
+        stringValue(
           props,
           "icon",
           "✦"
@@ -581,19 +661,19 @@ export function renderNode(
 
     case "logo":
       return createElement(
-        "div",
+        "strong",
         {
-          ...data(node),
+          ...common,
           style: {
-            fontSize: 22,
-            fontWeight: 750,
+            display:
+              "inline-block",
             ...styles,
           },
         },
-        getString(
+        stringValue(
           props,
           "text",
-          "Logo"
+          "Sytely"
         )
       );
 
@@ -601,7 +681,7 @@ export function renderNode(
       return createElement(
         "nav",
         {
-          ...data(node),
+          ...common,
           style: {
             display: "flex",
             flexWrap: "wrap",
@@ -620,7 +700,10 @@ export function renderNode(
                 "Contact",
               ]
         ).map(
-          (item, index) =>
+          (
+            item,
+            index
+          ) =>
             createElement(
               "a",
               {
@@ -633,7 +716,12 @@ export function renderNode(
                     "none",
                 },
               },
-              String(item)
+              typeof item ===
+                "string"
+                ? item
+                : `Link ${
+                    index + 1
+                  }`
             )
         )
       );
@@ -642,7 +730,7 @@ export function renderNode(
       return createElement(
         "div",
         {
-          ...data(node),
+          ...common,
           style: {
             display: "flex",
             flexWrap: "wrap",
@@ -661,7 +749,10 @@ export function renderNode(
                 "LinkedIn",
               ]
         ).map(
-          (item, index) =>
+          (
+            item,
+            index
+          ) =>
             createElement(
               "a",
               {
@@ -669,8 +760,8 @@ export function renderNode(
                 href: "#",
                 style: {
                   padding:
-                    "8px 11px",
-                  borderRadius: 8,
+                    "7px 10px",
+                  borderRadius: 7,
                   background:
                     "var(--sytely-card)",
                   color:
@@ -679,7 +770,12 @@ export function renderNode(
                     "none",
                 },
               },
-              String(item)
+              typeof item ===
+                "string"
+                ? item
+                : `Social ${
+                    index + 1
+                  }`
             )
         )
       );
@@ -688,52 +784,45 @@ export function renderNode(
       return createElement(
         "form",
         {
-          ...data(node),
+          ...common,
           onSubmit: (
-            event: any
-          ) => event.preventDefault(),
+            event: FormEvent
+          ) =>
+            event.preventDefault(),
           style: {
             display: "grid",
             gap: 12,
-            maxWidth: 560,
+            maxWidth: 620,
             ...styles,
           },
         },
         createElement(
-          "h3",
-          { style: { margin: 0 } },
-          getString(
+          "strong",
+          null,
+          stringValue(
             props,
             "title",
             "Contact us"
           )
         ),
-        ["Name", "Email"].map(
+        [
+          "Name",
+          "Email",
+        ].map(
           (label) =>
             createElement(
               "input",
               {
                 key: label,
                 type:
-                  label === "Email"
+                  label ===
+                  "Email"
                     ? "email"
                     : "text",
                 placeholder:
                   label,
-                style: {
-                  width: "100%",
-                  boxSizing:
-                    "border-box",
-                  padding:
-                    "12px 14px",
-                  borderRadius: 8,
-                  border:
-                    "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
-                  background:
-                    "var(--sytely-page)",
-                  color:
-                    "inherit",
-                },
+                style:
+                  inputStyle,
               }
             )
         ),
@@ -742,21 +831,9 @@ export function renderNode(
           {
             placeholder:
               "Message",
-            rows: 4,
-            style: {
-              width: "100%",
-              boxSizing:
-                "border-box",
-              padding:
-                "12px 14px",
-              borderRadius: 8,
-              border:
-                "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
-              background:
-                "var(--sytely-page)",
-              color:
-                "inherit",
-            },
+            rows: 5,
+            style:
+              inputStyle,
           }
         ),
         createElement(
@@ -764,19 +841,12 @@ export function renderNode(
           {
             type: "submit",
             style: {
+              ...buttonBase,
               width:
                 "fit-content",
-              padding:
-                "12px 18px",
-              border: 0,
-              borderRadius: 8,
-              background:
-                "var(--sytely-accent)",
-              color:
-                "var(--sytely-accent-text)",
             },
           },
-          getString(
+          stringValue(
             props,
             "submitLabel",
             "Send message"
@@ -788,26 +858,26 @@ export function renderNode(
       return createElement(
         "article",
         {
-          ...data(node),
+          ...common,
           style: {
             padding: 24,
             borderRadius: 14,
             background:
               "var(--sytely-card)",
             display: "grid",
-            gap: 10,
+            gap: 9,
             ...styles,
           },
         },
-        node.children?.length
+        children.length
           ? children
-          : createElement(
-              Fragment,
-              null,
+          : [
               createElement(
                 "strong",
-                null,
-                getString(
+                {
+                  key: "title",
+                },
+                stringValue(
                   props,
                   "title",
                   "Card title"
@@ -816,123 +886,184 @@ export function renderNode(
               createElement(
                 "p",
                 {
+                  key: "text",
                   style: {
                     margin: 0,
                     color:
                       "var(--sytely-text-muted)",
-                    lineHeight:
-                      1.6,
+                    lineHeight: 1.6,
                   },
                 },
-                getString(
+                stringValue(
                   props,
                   "text",
                   "Card description"
                 )
-              )
-            )
+              ),
+            ]
       );
 
     case "features":
       return createElement(
         "div",
         {
-          ...data(node),
+          ...common,
           style: {
             display: "grid",
-            gridTemplateColumns:
-              `repeat(${Math.max(
-                1,
-                Math.min(
-                  4,
-                  getNumber(
-                    props.columns,
-                    3
-                  )
+            gridTemplateColumns: `repeat(${Math.max(
+              1,
+              Math.min(
+                6,
+                numberValue(
+                  props,
+                  "columns",
+                  3
                 )
-              )},minmax(0,1fr))`,
+              )
+            )},minmax(0,1fr))`,
             gap: 16,
             width: "100%",
             ...styles,
           },
         },
-        renderCompositeChildren(
-          node,
-          device,
-          [
-            "Visual editing",
-            "Responsive layouts",
-            "Reusable sections",
-          ].map(
-            (title, index) => ({
-              id:
-                `${node.id}-feature-${index}`,
-              type: "card",
-              props: {
-                title,
-                text:
-                  "A reusable feature block.",
-              },
-              styles: {},
-            })
-          )
-        )
+        children.length
+          ? children.map(
+              (child) =>
+                cardFromChild(
+                  child,
+                  options
+                )
+            )
+          : [
+              "Visual editing",
+              "Responsive layouts",
+              "Reusable sections",
+            ].map((title) =>
+              createElement(
+                "article",
+                {
+                  key: title,
+                  style: {
+                    padding: 22,
+                    borderRadius: 12,
+                    background:
+                      "var(--sytely-card)",
+                  },
+                },
+                createElement(
+                  "strong",
+                  null,
+                  title
+                ),
+                createElement(
+                  "p",
+                  {
+                    style: {
+                      color:
+                        "var(--sytely-text-muted)",
+                    },
+                  },
+                  "A reusable feature block."
+                )
+              )
+            )
       );
 
     case "pricing":
       return createElement(
         "div",
         {
-          ...data(node),
+          ...common,
           style: {
             display: "grid",
-            gridTemplateColumns:
-              `repeat(${Math.max(
-                1,
-                Math.min(
-                  4,
-                  getNumber(
-                    props.columns,
-                    3
-                  )
+            gridTemplateColumns: `repeat(${Math.max(
+              1,
+              Math.min(
+                6,
+                numberValue(
+                  props,
+                  "columns",
+                  3
                 )
-              )},minmax(0,1fr))`,
+              )
+            )},minmax(0,1fr))`,
             gap: 16,
             width: "100%",
             ...styles,
           },
         },
-        renderCompositeChildren(
-          node,
-          device,
-          [
-            ["Starter", "$9"],
-            ["Pro", "$24"],
-            ["Business", "$59"],
-          ].map(
-            ([title, price], index) => ({
-              id:
-                `${node.id}-plan-${index}`,
-              type: "card",
-              props: {
+        children.length
+          ? children.map(
+              (child) =>
+                cardFromChild(
+                  child,
+                  options
+                )
+            )
+          : [
+              "Starter",
+              "Pro",
+              "Business",
+            ].map(
+              (
                 title,
-                text: price,
-              },
-              styles: {},
-            })
-          )
-        )
+                index
+              ) =>
+                createElement(
+                  "article",
+                  {
+                    key: title,
+                    style: {
+                      padding: 24,
+                      borderRadius: 12,
+                      background:
+                        "var(--sytely-card)",
+                    },
+                  },
+                  createElement(
+                    "strong",
+                    null,
+                    title
+                  ),
+                  createElement(
+                    "div",
+                    {
+                      style: {
+                        fontSize: 32,
+                        fontWeight: 800,
+                        margin:
+                          "14px 0",
+                      },
+                    },
+                    `$${[
+                      9,
+                      24,
+                      59,
+                    ][index]}`
+                  ),
+                  createElement(
+                    "p",
+                    {
+                      style: {
+                        color:
+                          "var(--sytely-text-muted)",
+                      },
+                    },
+                    "Flexible plan for your needs."
+                  )
+                )
+            )
       );
 
     case "testimonial":
       return createElement(
         "blockquote",
         {
-          ...data(node),
+          ...common,
           style: {
             margin: 0,
             padding: 28,
-            borderRadius: 14,
+            borderRadius: 12,
             background:
               "var(--sytely-card)",
             fontSize: 20,
@@ -940,10 +1071,10 @@ export function renderNode(
             ...styles,
           },
         },
-        `“${getString(
+        `“${stringValue(
           props,
           "quote",
-          getString(
+          stringValue(
             props,
             "text",
             "A thoughtful product makes the whole experience easier."
@@ -959,7 +1090,7 @@ export function renderNode(
                 "var(--sytely-text-muted)",
             },
           },
-          getString(
+          stringValue(
             props,
             "author",
             "Customer"
@@ -971,10 +1102,10 @@ export function renderNode(
       return createElement(
         "details",
         {
-          ...data(node),
+          ...common,
           style: {
-            padding: 18,
-            borderRadius: 10,
+            padding: 17,
+            borderRadius: 9,
             background:
               "var(--sytely-card)",
             ...styles,
@@ -984,11 +1115,12 @@ export function renderNode(
           "summary",
           {
             style: {
-              cursor: "pointer",
+              cursor:
+                "pointer",
               fontWeight: 700,
             },
           },
-          getString(
+          stringValue(
             props,
             "question",
             "Frequently asked question"
@@ -1002,10 +1134,10 @@ export function renderNode(
                 "var(--sytely-text-muted)",
             },
           },
-          getString(
+          stringValue(
             props,
             "answer",
-            "Edit this answer."
+            "Edit this answer in the inspector."
           )
         )
       );
@@ -1014,17 +1146,17 @@ export function renderNode(
       return createElement(
         "div",
         {
-          ...data(node),
+          ...common,
           style: {
             display: "grid",
-            gap: 7,
+            gap: 8,
             ...styles,
           },
         },
         createElement(
           "strong",
           null,
-          getString(
+          stringValue(
             props,
             "title",
             "Contact"
@@ -1038,7 +1170,7 @@ export function renderNode(
                 "var(--sytely-text-muted)",
             },
           },
-          getString(
+          stringValue(
             props,
             "email",
             "hello@example.com"
@@ -1052,7 +1184,7 @@ export function renderNode(
                 "var(--sytely-text-muted)",
             },
           },
-          getString(
+          stringValue(
             props,
             "phone",
             "+1 000 000 0000"
@@ -1064,7 +1196,7 @@ export function renderNode(
       return createElement(
         "footer",
         {
-          ...data(node),
+          ...common,
           style: {
             width: "100%",
             padding: 28,
@@ -1075,13 +1207,11 @@ export function renderNode(
             ...styles,
           },
         },
-        node.children?.length
-          ? children
-          : getString(
-              props,
-              "text",
-              "© 2026 Your brand. All rights reserved."
-            )
+        stringValue(
+          props,
+          "text",
+          "© 2026 Your brand. All rights reserved."
+        )
       );
 
     default:
@@ -1092,20 +1222,42 @@ export function renderNode(
 export function SytelyRenderer({
   nodes,
   device = "desktop",
+  editable = false,
+  selectedIds,
+  onNodeClick,
+  onNodeDragStart,
 }: {
   nodes: ComponentNode[];
   device?: RenderDevice;
+  editable?: boolean;
+  selectedIds?: string[];
+  onNodeClick?: (
+    id: string,
+    event: ReactMouseEvent
+  ) => void;
+  onNodeDragStart?: DragEventHandler<HTMLElement>;
 }) {
+  const options: RenderOptions = {
+    device,
+    editable,
+    selectedIds,
+    onNodeClick,
+    onNodeDragStart,
+  };
+
   return createElement(
     Fragment,
     null,
     nodes.map((node) =>
       createElement(
         Fragment,
-        { key: node.id },
-        renderNode(node, {
-          device,
-        })
+        {
+          key: node.id,
+        },
+        renderNode(
+          node,
+          options
+        )
       )
     )
   );

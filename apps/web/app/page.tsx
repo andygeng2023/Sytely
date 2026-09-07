@@ -1,37 +1,11 @@
 import Link from "next/link";
-import "./home.css";
 
-const features = [
-  [
-    "Visual canvas",
-    "Drag, arrange and edit real components directly on the page.",
-  ],
-  [
-    "Responsive design",
-    "Preview desktop, tablet and mobile layouts from one editor.",
-  ],
-  [
-    "Pages and layers",
-    "Organize pages and inspect the complete component tree.",
-  ],
-  [
-    "Editable sections",
-    "Use ready-made sections while keeping every element editable.",
-  ],
-  [
-    "Multiple websites",
-    "Manage separate websites from one simple workspace.",
-  ],
-  [
-    "Local-first",
-    "Your current workspace persists in the browser without a backend requirement.",
-  ],
-];
+import "./home.css";
 
 export default function HomePage() {
   return (
-    <main className="home-page">
-      <header className="home-nav">
+    <main className="home">
+      <header>
         <Link
           href="/"
           className="home-brand"
@@ -49,13 +23,13 @@ export default function HomePage() {
           </a>
 
           <Link href="/mysites">
-            My Sites
+            My websites
           </Link>
         </nav>
       </header>
 
       <section className="hero">
-        <div className="hero-copy">
+        <div>
           <span className="eyebrow">
             VISUAL WEBSITE BUILDER
           </span>
@@ -66,77 +40,118 @@ export default function HomePage() {
           </h1>
 
           <p>
-            Design responsive pages on
-            a visual canvas, edit
-            components directly, and
-            keep separate websites
-            organized in one workspace.
+            Drag real components onto a
+            responsive canvas, arrange them
+            into columns, edit their content,
+            pan and zoom freely, then preview
+            the actual page.
           </p>
 
-          <div className="hero-actions">
-            <Link
-              href="/mysites"
-              className="hero-primary"
-            >
+          <div className="actions">
+            <Link href="/mysites">
               Open Sytely
             </Link>
 
-            <a
-              href="#features"
-              className="hero-secondary"
-            >
+            <a href="#features">
               Explore features
             </a>
           </div>
         </div>
 
-        <div className="hero-window">
-          <div className="window-bar">
-            <i />
-            <i />
-            <i />
+        <div className="mock">
+          <div className="mock-top">
+            <b>
+              Sytely / Editor
+            </b>
+
+            <span>
+              Desktop&nbsp;&nbsp; Tablet&nbsp;&nbsp; Mobile
+            </span>
           </div>
 
-          <div className="window-layout">
+          <div className="mock-body">
             <aside />
 
-            <div className="window-canvas">
-              <b />
-              <span />
+            <div className="mock-page">
+              <i />
 
-              <div>
-                <i />
-                <i />
-                <i />
+              <h3>
+                Build something
+                people remember
+              </h3>
+
+              <p>
+                Visual editing.
+                Responsive structure.
+                No code.
+              </p>
+
+              <button>
+                Get started
+              </button>
+
+              <div className="mock-cols">
+                <span />
+                <span />
+                <span />
               </div>
             </div>
+
+            <aside className="mock-right" />
           </div>
         </div>
       </section>
 
       <section
         id="features"
-        className="feature-section"
+        className="section"
       >
-        <div className="section-heading">
-          <span>
-            BUILT FOR VISUAL WORK
-          </span>
+        <span className="eyebrow">
+          CORE EDITING
+        </span>
 
-          <h2>
-            Everything important stays
-            close to the canvas.
-          </h2>
-        </div>
+        <h2>
+          Everything stays a real
+          component.
+        </h2>
 
-        <div className="feature-grid">
-          {features.map(
-            ([title, description]) => (
-              <article key={title}>
-                <b>{title}</b>
+        <div className="grid">
+          {[
+            [
+              "Direct selection",
+              "Select the actual heading, button, image or section — no fake editor wrapper around the element.",
+            ],
+            [
+              "Natural columns",
+              "Drop a component beside another component and Sytely turns the section into a responsive multi-column layout.",
+            ],
+            [
+              "Free canvas",
+              "Zoom in, zoom out and pan around large pages without losing your place.",
+            ],
+            [
+              "Responsive",
+              "Desktop, tablet and mobile use the same page structure with breakpoint-aware layout rules.",
+            ],
+            [
+              "Pages and sites",
+              "Manage websites separately at My Sites and keep pages organized inside each site.",
+            ],
+            [
+              "Undo and save",
+              "Use keyboard shortcuts, duplicate, reorder, group, ungroup and save the complete site.",
+            ],
+          ].map(
+            ([title, text]) => (
+              <article
+                key={title}
+              >
+                <strong>
+                  {title}
+                </strong>
 
                 <p>
-                  {description}
+                  {text}
                 </p>
               </article>
             )
@@ -148,24 +163,71 @@ export default function HomePage() {
         id="workflow"
         className="workflow"
       >
-        <span>
-          WORKFLOW
+        <div>
+          <span className="eyebrow">
+            WORKFLOW
+          </span>
+
+          <h2>
+            Place things where they
+            belong.
+          </h2>
+
+          <p>
+            Drag from the component
+            library, move existing
+            elements before or after
+            siblings, or drop into a
+            container. The editor computes
+            the layout from the same
+            component tree used by preview.
+          </p>
+        </div>
+
+        <ol>
+          <li>
+            <b>01</b>
+            <span>
+              Add a section.
+            </span>
+          </li>
+
+          <li>
+            <b>02</b>
+            <span>
+              Drop components inside.
+            </span>
+          </li>
+
+          <li>
+            <b>03</b>
+            <span>
+              Drop beside components
+              to create columns.
+            </span>
+          </li>
+
+          <li>
+            <b>04</b>
+            <span>
+              Refine and preview.
+            </span>
+          </li>
+        </ol>
+      </section>
+
+      <section className="final">
+        <span className="eyebrow">
+          START BUILDING
         </span>
 
         <h2>
-          Choose a website. Edit it.
-          Preview it. Save it.
+          Open your website
+          workspace.
         </h2>
 
-        <p>
-          The editor is site-specific,
-          so the workspace stays focused
-          on the website you are actually
-          building.
-        </p>
-
         <Link href="/mysites">
-          Go to My Sites →
+          My websites
         </Link>
       </section>
     </main>

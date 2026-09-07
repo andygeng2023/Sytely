@@ -2,12 +2,15 @@
 
 import { useParams } from "next/navigation";
 import Editor from "./Editor";
+import "./editor.css";
 
-export default function SiteEditorPage() {
+export default function Page() {
   const params =
-    useParams<{ site: string }>();
+    useParams<{
+      site: string;
+    }>();
 
-  if (!params?.site) {
+  if (!params.site) {
     return null;
   }
 

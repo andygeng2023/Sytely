@@ -19,129 +19,150 @@ import type { Site } from "@sytely/types";
 
 import "./preview.css";
 
-const SITES_KEY =
+type Device =
+  | "desktop"
+  | "tablet"
+  | "mobile";
+
+const SITES =
   "sytely-sites";
 
-const LEGACY_KEY =
+const LEGACY =
   "sytely-site";
 
-const slugify = (value: string) =>
+const slugify = (
+  value: string
+) =>
   value
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") ||
+    .replace(
+      /[^a-z0-9]+/g,
+      "-"
+    )
+    .replace(
+      /^-+|-+$/g,
+      "") ||
   "website";
 
 export default function PreviewPage() {
-  const {
-    site: routeSite,
-  } =
+  const params =
     useParams<{
       site: string;
     }>();
 
-  const params =
+  const query =
     useSearchParams();
 
   const [site, setSite] =
-    useState<Site | null>(null);
+    useState<Site | null>(
+      null
+    );
 
   const [error, setError] =
     useState("");
 
-  const requestedPage =
-    params.get("page") || "/";
-
-  const device =
-    params.get("device") ===
-      "mobile" ||
-    params.get("device") ===
-      "tablet"
-      ? (params.get(
+  const device: Device =
+    query.get("device") ===
+      "tablet" ||
+    query.get("device") ===
+      "mobile"
+      ? (query.get(
           "device"
-        ) as
-          | "mobile"
-          | "tablet")
+        ) as Device)
       : "desktop";
+
+  const requestedPage =
+    query.get("page") ??
+    "/";
 
   useEffect(() => {
     try {
-      let sites: Site[] = [];
-
       const raw =
         localStorage.getItem(
-          SITES_KEY
+          SITES
         );
 
+      const legacy =
+        localStorage.getItem(
+          LEGACY
+        );
+
+      let sites: Site[] =
+        [];
+
       if (raw) {
-        const parsed =
+        const parsed: unknown =
           JSON.parse(raw);
 
-        if (Array.isArray(parsed)) {
-          sites = parsed;
+        if (
+          Array.isArray(parsed)
+        ) {
+          sites =
+            parsed as Site[];
         }
       }
 
-      if (!sites.length) {
-        const legacy =
-          localStorage.getItem(
-            LEGACY_KEY
-          );
+      if (
+        !sites.length &&
+        legacy
+      ) {
+        const parsed: unknown =
+          JSON.parse(legacy);
 
-        if (legacy) {
-          const parsed =
-            JSON.parse(legacy);
-
-          if (parsed) {
-            sites = [parsed];
-          }
+        if (
+          parsed &&
+          typeof parsed ===
+            "object"
+        ) {
+          sites = [
+            parsed as Site,
+          ];
         }
       }
+
+      const slug =
+        params.site;
 
       const found =
-        sites.find(item => {
-          const slug =
-            (
-              item as Site & {
-                slug?: string;
-              }
-            ).slug ||
-            slugify(item.name);
-
-          return (
-            slug === routeSite ||
-            item.id === routeSite ||
-            slugify(item.name) ===
-              routeSite
-          );
-        });
+        sites.find(
+          (item) =>
+            item.id ===
+              slug ||
+            item.slug ===
+              slug ||
+            slugify(
+              item.name
+            ) === slug
+        );
 
       if (!found) {
         setError(
           "Website not found."
         );
-        return;
+      } else {
+        setSite(found);
       }
-
-      setSite(found);
     } catch {
       setError(
         "Unable to load preview."
       );
     }
-  }, [routeSite]);
+  }, [params.site]);
 
   const page = useMemo(
     () =>
       site?.pages.find(
-        item =>
+        (item) =>
           item.slug ===
           requestedPage
       ) ??
       site?.pages[0] ??
       null,
-    [site, requestedPage]
+    [
+      site,
+      requestedPage,
+    ]
   );
 
   if (error) {
@@ -170,24 +191,30 @@ export default function PreviewPage() {
 
   return (
     <main
-      className={`sytely-preview ${device}`}
+      className={`preview device-${device}`}
     >
       <div
         className="preview-page"
         style={{
           background:
-            typeof page.styles
+            typeof page
+              .styles
               ?.background ===
             "string"
-              ? page.styles
+              ? page
+                  .styles
                   .background
               : undefined,
+
           paddingTop:
             page.margins.top,
+
           paddingRight:
             page.margins.right,
+
           paddingBottom:
             page.margins.bottom,
+
           paddingLeft:
             page.margins.left,
         }}
@@ -196,7 +223,9 @@ export default function PreviewPage() {
           nodes={
             page.components
           }
-          device={device}
+          device={
+            device
+          }
         />
       </div>
     </main>

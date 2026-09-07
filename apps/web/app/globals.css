@@ -1,1 +1,52 @@
-*{box-sizing:border-box}html,body{margin:0;padding:0;min-height:100%;background:#fff}body{font-family:Arial,Helvetica,sans-serif}button,input,textarea,select{font:inherit}button{cursor:pointer}
+*{
+  box-sizing:border-box
+}
+
+html{
+  margin:0;
+  padding:0
+}
+
+body{
+  margin:0;
+  min-height:100vh
+}
+
+button,
+input,
+textarea,
+select{
+  font:inherit
+}
+
+button{
+  cursor:pointer
+}
+
+a{
+  color:inherit
+}
+
+:root{
+  --sytely-page:#fff;
+  --sytely-surface:#fff;
+  --sytely-card:#f5f6f8;
+  --sytely-text:#17191d;
+  --sytely-text-muted:#6d737d;
+  --sytely-accent:#17191d;
+  --sytely-accent-text:#fff;
+  --sytely-placeholder-a:#eef0f3;
+  --sytely-placeholder-b:#e5e8ec
+}
+
+@media(prefers-color-scheme:dark){
+  :root{
+    --sytely-page:#101214;
+    --sytely-surface:#15181c;
+    --sytely-card:#1b1f24;
+    --sytely-text:#f5f7fa;
+    --sytely-text-muted:#a7adb6;
+    --sytely-accent:#fff;
+    --sytely-accent-text:#111
+  }
+}
