@@ -14,16 +14,20 @@ export default function HomePage() {
         </Link>
 
         <nav>
-          <a href="#features">
-            Features
-          </a>
+          <Link href="/how-to-use">
+            How to use
+          </Link>
 
-          <a href="#workflow">
-            Workflow
-          </a>
+          <Link href="/pricing">
+            Pricing
+          </Link>
+
+          <Link href="/faq">
+            FAQ
+          </Link>
 
           <Link href="/mysites">
-            My websites
+            Open builder
           </Link>
         </nav>
       </header>
@@ -53,7 +57,7 @@ export default function HomePage() {
             </Link>
 
             <a href="#features">
-              Explore features
+              See how it works
             </a>
           </div>
         </div>

@@ -35,6 +35,11 @@ type DropPosition =
   | "after"
   | "inside";
 
+type DropLayout =
+  | "stack"
+  | "columns"
+  | "inside";
+
 type DragPayload =
   | {
       kind: "component";
@@ -54,6 +59,10 @@ interface DropTarget {
   parentId: string | null;
   index: number;
   position: DropPosition;
+  layout: DropLayout;
+  containerLabel: string;
+  columnCount: number;
+  createsColumns: boolean;
 }
 
 interface Template {
@@ -77,6 +86,23 @@ interface MarqueeState {
   startY: number;
   currentX: number;
   currentY: number;
+}
+
+interface TouchGesture {
+  startPan: {
+    x: number;
+    y: number;
+  };
+  startZoom: number;
+  startPoint: {
+    x: number;
+    y: number;
+  };
+  startDistance: number;
+  startMidpoint: {
+    x: number;
+    y: number;
+  };
 }
 
 const STORAGE_SITES = "sytely-sites";
@@ -226,10 +252,10 @@ function section(
     {
       paddingTop:
         DEFAULT_SECTION_PADDING,
-      paddingRight: 40,
+      paddingRight: 0,
       paddingBottom:
         DEFAULT_SECTION_PADDING,
-      paddingLeft: 40,
+      paddingLeft: 0,
       gap: 24,
       ...styles,
     },
@@ -947,6 +973,183 @@ function insertAt(
   );
 }
 
+function withColumns(
+  node: ComponentNode,
+): ComponentNode {
+  const count = node.children?.length ?? 0;
+
+  return {
+    ...node,
+    styles: {
+      ...(node.styles ?? {}),
+      display: "grid",
+      gridAutoColumns: "minmax(0,1fr)",
+      gridTemplateColumns:
+        `repeat(${Math.max(2, count)},minmax(0,1fr))`,
+      alignItems: "stretch",
+    },
+  };
+}
+
+function columnItem(
+  item: ComponentNode,
+  reference?: ComponentNode,
+): ComponentNode {
+  const source = reference?.styles ?? {};
+  const current = item.styles ?? {};
+  const compatibleSize = [
+    "height",
+    "minHeight",
+    "maxHeight",
+  ].reduce(
+    (
+      result: Record<string, unknown>,
+      key: string,
+    ): Record<string, unknown> =>
+      source[key] !== undefined
+        ? {
+            ...result,
+            [key]: source[key],
+          }
+        : result,
+    {},
+  );
+
+  return {
+    ...item,
+    styles: {
+      ...current,
+      ...compatibleSize,
+      width: "100%",
+      minWidth: 0,
+      maxWidth: "none",
+    },
+  };
+}
+
+function groupRootNodes(
+  nodes: ComponentNode[],
+  ids: Set<string>,
+): ComponentNode[] {
+  const selected = nodes.filter(
+    (item: ComponentNode): boolean =>
+      ids.has(item.id),
+  );
+
+  if (selected.length < 2) {
+    return nodes;
+  }
+
+  const firstIndex = nodes.findIndex(
+    (item: ComponentNode): boolean =>
+      ids.has(item.id),
+  );
+  const remaining = nodes.filter(
+    (item: ComponentNode): boolean =>
+      !ids.has(item.id),
+  );
+  const reference = selected[0];
+  const group = section(
+    selected.map((item) =>
+      columnItem(item, reference),
+    ),
+    {
+    display: "grid",
+      gridAutoColumns: "minmax(0,1fr)",
+    gridTemplateColumns:
+      `repeat(${selected.length},minmax(0,1fr))`,
+      alignItems: "stretch",
+    },
+  );
+
+  remaining.splice(firstIndex, 0, group);
+  return remaining;
+}
+
+function applyColumnDrop(
+  nodes: ComponentNode[],
+  targetId: string,
+  insertedIds: string[],
+  referenceId = targetId,
+): ComponentNode[] {
+  const parentId = findParentId(
+    nodes,
+    targetId,
+  );
+
+  if (parentId !== null) {
+    const parent = findNode(
+      nodes,
+      parentId,
+    );
+
+    if (parent?.type === "section") {
+      return replaceNode(
+        nodes,
+        parentId,
+        (sectionNode: ComponentNode): ComponentNode =>
+          withColumns({
+            ...sectionNode,
+            children: (sectionNode.children ?? []).map(
+              (item: ComponentNode): ComponentNode =>
+                  columnItem(
+                    item,
+                    findNode(
+                      sectionNode.children ?? [],
+                      referenceId,
+                  ) ?? sectionNode.children?.[0] ?? undefined,
+                  ),
+            ),
+          }),
+      );
+    }
+  }
+
+  return groupRootNodes(
+    nodes,
+    new Set([targetId, ...insertedIds]),
+  );
+}
+
+function placeDroppedNodes(
+  nodes: ComponentNode[],
+  target: DropTarget,
+  items: ComponentNode[],
+): ComponentNode[] {
+  const reference = target.id
+    ? findNode(nodes, target.id) ?? undefined
+    : undefined;
+  const normalizedItems =
+    target.layout === "columns"
+      ? items.map((item) =>
+          columnItem(item, reference),
+        )
+      : items;
+  const destination =
+    target.position === "inside"
+      ? target.id
+      : target.parentId;
+  const next = insertAt(
+    nodes,
+    destination,
+    target.index,
+    normalizedItems,
+  );
+
+  return target.layout === "columns" &&
+    target.id
+    ? applyColumnDrop(
+        next,
+        target.id,
+        items.map(
+          (item: ComponentNode): string =>
+            item.id,
+        ),
+          target.id,
+      )
+    : next;
+}
+
 function replaceNode(
   nodes: ComponentNode[],
   id: string,
@@ -1160,6 +1363,14 @@ export default function Editor({
       startX: number;
       startY: number;
     } | null>(null);
+
+  const touchPoints =
+    useRef<Map<number, { x: number; y: number }>>(
+      new Map(),
+    );
+
+  const touchGesture =
+    useRef<TouchGesture | null>(null);
 
   const activePage: SitePage | null =
     useMemo(() => {
@@ -1447,6 +1658,20 @@ export default function Editor({
     [site],
   );
 
+  useEffect(() => {
+    if (!dirty) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      save();
+    }, 900);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [dirty, save]);
+
   const undo = useCallback(
     (): void => {
       setHistory(
@@ -1703,15 +1928,11 @@ export default function Editor({
       (
         direction: -1 | 1,
       ): void => {
-        if (
-          !activePage ||
-          selectedIds.length !== 1
-        ) {
+        if (!activePage || !selectedIds.length) {
           return;
         }
 
-        const id =
-          selectedIds[0];
+        const id = selectedIds[0];
 
         const parentId =
           findParentId(
@@ -1725,44 +1946,40 @@ export default function Editor({
             parentId,
           );
 
-        const index =
+        const selected = siblings.filter(
+          (item: ComponentNode): boolean =>
+            selectedIds.includes(item.id),
+        );
+        const indexes = selected.map((item) =>
           siblings.findIndex(
-            (
-              item: ComponentNode,
-            ): boolean =>
-              item.id === id,
-          );
-
+            (sibling) => sibling.id === item.id,
+          ),
+        );
         const nextIndex =
-          index + direction;
+          direction < 0
+            ? Math.min(...indexes) - 1
+            : Math.max(...indexes) + 1;
 
         if (
-          index < 0 ||
+          !selected.length ||
           nextIndex < 0 ||
-          nextIndex >=
-            siblings.length
+          nextIndex >= siblings.length
         ) {
           return;
         }
 
-        const reordered =
-          [...siblings];
-
-        const moved =
-          reordered.splice(
-            index,
-            1,
-          )[0];
-
-        if (!moved) {
-          return;
-        }
-
-        reordered.splice(
-          nextIndex,
-          0,
-          moved,
+        const reordered = siblings.filter(
+          (item) => !selectedIds.includes(item.id),
         );
+        const insertion = Math.max(
+          0,
+          Math.min(
+            nextIndex -
+              indexes.filter((index) => index < nextIndex).length,
+            reordered.length,
+          ),
+        );
+        reordered.splice(insertion, 0, ...selected);
 
         updatePage(
           (
@@ -1798,6 +2015,149 @@ export default function Editor({
         updatePage,
       ],
     );
+
+  const ungroupSelected =
+    useCallback((): void => {
+      if (!activePage || selectedIds.length !== 1) {
+        return;
+      }
+
+      const selected = findNode(
+        activePage.components,
+        selectedIds[0],
+      );
+
+      if (
+        !selected ||
+        selected.type !== "section" ||
+        !selected.children?.length
+      ) {
+        return;
+      }
+
+      const parentId = findParentId(
+        activePage.components,
+        selected.id,
+      );
+      const siblings = findChildren(
+        activePage.components,
+        parentId,
+      );
+      const index = siblings.findIndex(
+        (item) => item.id === selected.id,
+      );
+      const next = [...siblings];
+      next.splice(index, 1, ...selected.children);
+
+      updatePage((page) =>
+        parentId === null
+          ? { ...page, components: next }
+          : {
+              ...page,
+              components: replaceNode(
+                page.components,
+                parentId,
+                (parent) => ({
+                  ...parent,
+                  children: next,
+                }),
+              ),
+            },
+      );
+      setSelectedIds(
+        selected.children.map((item) => item.id),
+      );
+    }, [
+      activePage,
+      selectedIds,
+      updatePage,
+    ]);
+
+  const groupSelected =
+    useCallback((): void => {
+      if (
+        !activePage ||
+        selectedIds.length < 2
+      ) {
+        return;
+      }
+
+      const parentId = findParentId(
+        activePage.components,
+        selectedIds[0],
+      );
+
+      if (
+        selectedIds.some(
+          (id: string): boolean =>
+            findParentId(
+              activePage.components,
+              id,
+            ) !== parentId,
+        )
+      ) {
+        return;
+      }
+
+      const siblings = findChildren(
+        activePage.components,
+        parentId,
+      );
+      const selected = siblings.filter(
+        (item: ComponentNode): boolean =>
+          selectedIds.includes(item.id),
+      );
+
+      if (selected.length < 2) {
+        return;
+      }
+
+      const firstIndex = siblings.findIndex(
+        (item: ComponentNode): boolean =>
+          selectedIds.includes(item.id),
+      );
+      const selectedSet = new Set(
+        selectedIds,
+      );
+      const remaining = siblings.filter(
+        (item: ComponentNode): boolean =>
+          !selectedSet.has(item.id),
+      );
+      const grouped = section(selected, {
+        display: "grid",
+        gridTemplateColumns:
+          `repeat(${selected.length},minmax(0,1fr))`,
+      });
+
+      remaining.splice(firstIndex, 0, grouped);
+
+      updatePage(
+        (page: SitePage): SitePage =>
+          parentId === null
+            ? {
+                ...page,
+                components: remaining,
+              }
+            : {
+                ...page,
+                components: replaceNode(
+                  page.components,
+                  parentId,
+                  (parent: ComponentNode) => ({
+                    ...parent,
+                    children: remaining,
+                  }),
+                ),
+              },
+      );
+
+      setSelectedIds([grouped.id]);
+      setPageSelected(false);
+    }, [
+      activePage,
+      selectedIds,
+      updatePage,
+    ]);
 
   const addComponent =
     useCallback(
@@ -2107,6 +2467,10 @@ export default function Editor({
                 .components
                 .length,
             position: "after",
+            layout: "stack",
+            containerLabel: "Page",
+            columnCount: 1,
+            createsColumns: false,
           };
         }
 
@@ -2183,20 +2547,22 @@ export default function Editor({
                 ?.length ?? 0,
             position:
               "inside",
+            layout: "inside",
+            containerLabel: "Section",
+            columnCount:
+              (target.children?.length ?? 0) + 1,
+            createsColumns:
+              (target.children?.length ?? 0) >= 1,
           };
         }
 
-        /*
-         * Dropping on the left/right side of
-         * a component means place beside it.
-         */
         const beside =
           relX < 0.25 ||
           relX > 0.75;
 
-        const before =
-          beside &&
-          relX < 0.5;
+        const before = beside
+          ? relX < 0.5
+          : relY < 0.5;
 
         return {
           id,
@@ -2207,6 +2573,41 @@ export default function Editor({
           position: before
             ? "before"
             : "after",
+          layout: beside
+            ? "columns"
+            : "stack",
+          containerLabel:
+            parentId
+              ? componentInfo[
+                  findNode(
+                    activePage.components,
+                    parentId,
+                  )?.type ?? "section"
+                ].label
+              : "Page",
+          columnCount:
+            parentId &&
+            findNode(
+              activePage.components,
+              parentId,
+            )?.type === "section"
+              ? (findNode(
+                  activePage.components,
+                  parentId,
+                )?.children?.length ?? 0) + 1
+              : 1,
+          createsColumns:
+            Boolean(
+              parentId &&
+                findNode(
+                  activePage.components,
+                  parentId,
+                )?.type === "section" &&
+                (findNode(
+                  activePage.components,
+                  parentId,
+                )?.children?.length ?? 0) >= 1,
+            ),
         };
       },
       [activePage],
@@ -2270,6 +2671,13 @@ export default function Editor({
           return;
         }
 
+        const destination =
+          target.position === "inside"
+            ? target.id
+            : target.parentId;
+
+        const insertionIndex = target.index;
+
         if (
           payload.kind ===
           "component"
@@ -2278,12 +2686,6 @@ export default function Editor({
             makeComponent(
               payload.componentType,
             );
-
-          const destination =
-            target.position ===
-            "inside"
-              ? target.id
-              : target.parentId;
 
           commit(
             (
@@ -2300,13 +2702,11 @@ export default function Editor({
                       ? page
                       : {
                           ...page,
-                          components:
-                            insertAt(
-                              page.components,
-                              destination,
-                              target.index,
-                              [fresh],
-                            ),
+                          components: placeDroppedNodes(
+                            page.components,
+                            target,
+                            [fresh],
+                          ),
                         },
                 ),
             }),
@@ -2337,12 +2737,6 @@ export default function Editor({
               template.node,
             );
 
-          const destination =
-            target.position ===
-            "inside"
-              ? target.id
-              : target.parentId;
-
           commit(
             (
               current: Site,
@@ -2358,13 +2752,11 @@ export default function Editor({
                       ? page
                       : {
                           ...page,
-                          components:
-                            insertAt(
-                              page.components,
-                              destination,
-                              target.index,
-                              [fresh],
-                            ),
+                          components: placeDroppedNodes(
+                            page.components,
+                            target,
+                            [fresh],
+                          ),
                         },
                 ),
             }),
@@ -2437,12 +2829,6 @@ export default function Editor({
               payload.nodeIds,
             );
 
-          const destination =
-            target.position ===
-            "inside"
-              ? target.id
-              : target.parentId;
-
           commit(
             (
               current: Site,
@@ -2476,7 +2862,7 @@ export default function Editor({
                       originalSiblings
                         .slice(
                           0,
-                          target.index,
+                          insertionIndex,
                         )
                         .filter(
                           (
@@ -2502,57 +2888,22 @@ export default function Editor({
                         removed.removed,
                       );
 
-                    /*
-                     * Side-by-side drops into a section
-                     * automatically convert that section
-                     * into a responsive grid.
-                     */
                     if (
-                      destination
+                      target.layout ===
+                        "columns" &&
+                      target.id
                     ) {
-                      const destinationNode =
-                        findNode(
+                      next =
+                        applyColumnDrop(
                           next,
-                          destination,
+                          target.id,
+                          removed.removed.map(
+                            (
+                              item: ComponentNode,
+                            ): string =>
+                              item.id,
+                          ),
                         );
-
-                      if (
-                        destinationNode
-                          ?.type ===
-                          "section"
-                      ) {
-                        const count =
-                          destinationNode
-                            .children
-                            ?.length ??
-                          0;
-
-                        if (
-                          count >= 2
-                        ) {
-                          next =
-                            replaceNode(
-                              next,
-                              destination,
-                              (
-                                sectionNode: ComponentNode,
-                              ): ComponentNode => ({
-                                ...sectionNode,
-                                styles: {
-                                  ...(sectionNode.styles ??
-                                    {}),
-                                  display:
-                                    "grid",
-                                  gridTemplateColumns:
-                                    `repeat(${Math.min(
-                                      count,
-                                      6,
-                                    )},minmax(0,1fr))`,
-                                },
-                              }),
-                            );
-                        }
-                      }
                     }
 
                     return {
@@ -2878,6 +3229,263 @@ export default function Editor({
       [pan],
     );
 
+  const fitCanvas =
+    useCallback((): void => {
+      const canvas =
+        canvasRef.current;
+
+      if (!canvas) {
+        return;
+      }
+
+      const width =
+        device === "mobile"
+          ? 390
+          : device === "tablet"
+            ? 768
+            : 1180;
+
+      const availableWidth =
+        Math.max(
+          320,
+          canvas.clientWidth - 318,
+        );
+
+      const availableHeight =
+        Math.max(
+          420,
+          canvas.clientHeight - 32,
+        );
+
+      const nextZoom = Math.max(
+        30,
+        Math.min(
+          100,
+          Math.floor(
+            Math.min(
+              availableWidth / width,
+              availableHeight / 700,
+            ) * 100,
+          ),
+        ),
+      );
+
+      setZoom(nextZoom);
+      setPan({
+        x: 0,
+        y: 0,
+      });
+    }, [device]);
+
+  useEffect(() => {
+    fitCanvas();
+  }, [activePageId, device, fitCanvas]);
+
+  const handleCanvasWheel =
+    useCallback(
+      (event: React.WheelEvent<HTMLDivElement>): void => {
+        if (!event.ctrlKey && !event.metaKey) {
+          return;
+        }
+
+        event.preventDefault();
+        setZoom(
+          (value: number): number =>
+            Math.max(
+              30,
+              Math.min(
+                150,
+                value -
+                  Math.sign(event.deltaY) * 5,
+              ),
+            ),
+        );
+      },
+      [],
+    );
+
+  const handleCanvasPointerDown =
+    useCallback(
+      (
+        event: ReactPointerEvent<HTMLDivElement>,
+      ): void => {
+        if (event.pointerType !== "touch") {
+          startPan(event);
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(
+          event.pointerId,
+        );
+
+        touchPoints.current.set(
+          event.pointerId,
+          {
+            x: event.clientX,
+            y: event.clientY,
+          },
+        );
+
+        const points = [
+          ...touchPoints.current.values(),
+        ];
+
+        if (points.length === 1) {
+          const point = points[0];
+
+          touchGesture.current = {
+            startPan: pan,
+            startZoom: zoom,
+            startPoint: point,
+            startDistance: 0,
+            startMidpoint: point,
+          };
+        } else if (points.length === 2) {
+          const first = points[0];
+          const second = points[1];
+
+          touchGesture.current = {
+            startPan: pan,
+            startZoom: zoom,
+            startPoint: first,
+            startDistance: Math.hypot(
+              second.x - first.x,
+              second.y - first.y,
+            ),
+            startMidpoint: {
+              x: (first.x + second.x) / 2,
+              y: (first.y + second.y) / 2,
+            },
+          };
+        }
+      },
+      [pan, startPan, zoom],
+    );
+
+  const handleCanvasPointerMove =
+    useCallback(
+      (
+        event: ReactPointerEvent<HTMLDivElement>,
+      ): void => {
+        if (event.pointerType !== "touch") {
+          return;
+        }
+
+        const point = {
+          x: event.clientX,
+          y: event.clientY,
+        };
+
+        if (!touchPoints.current.has(event.pointerId)) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        touchPoints.current.set(
+          event.pointerId,
+          point,
+        );
+
+        const points = [
+          ...touchPoints.current.values(),
+        ];
+        const gesture = touchGesture.current;
+
+        if (!gesture) {
+          return;
+        }
+
+        if (points.length >= 2) {
+          const first = points[0];
+          const second = points[1];
+          const distance = Math.hypot(
+            second.x - first.x,
+            second.y - first.y,
+          );
+          const midpoint = {
+            x: (first.x + second.x) / 2,
+            y: (first.y + second.y) / 2,
+          };
+          const ratio =
+            gesture.startDistance > 0
+              ? distance / gesture.startDistance
+              : 1;
+
+          setZoom(
+            Math.max(
+              30,
+              Math.min(
+                150,
+                Math.round(
+                  (gesture.startZoom * ratio) / 5,
+                ) * 5,
+              ),
+            ),
+          );
+          setPan({
+            x:
+              gesture.startPan.x +
+              midpoint.x -
+                gesture.startMidpoint.x,
+            y:
+              gesture.startPan.y +
+              midpoint.y -
+                gesture.startMidpoint.y,
+          });
+          return;
+        }
+
+        setPan({
+          x:
+            gesture.startPan.x +
+            point.x -
+            gesture.startPoint.x,
+          y:
+            gesture.startPan.y +
+            point.y -
+            gesture.startPoint.y,
+        });
+      },
+      [],
+    );
+
+  const handleCanvasPointerUp =
+    useCallback(
+      (
+        event: ReactPointerEvent<HTMLDivElement>,
+      ): void => {
+        if (event.pointerType !== "touch") {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        touchPoints.current.delete(
+          event.pointerId,
+        );
+
+        const remaining = [
+          ...touchPoints.current.values(),
+        ];
+
+        if (remaining.length === 1) {
+          touchGesture.current = {
+            startPan: pan,
+            startZoom: zoom,
+            startPoint: remaining[0],
+            startDistance: 0,
+            startMidpoint: remaining[0],
+          };
+        } else if (!remaining.length) {
+          touchGesture.current = null;
+        }
+      },
+      [pan, zoom],
+    );
+
   const startMarquee =
     useCallback(
       (
@@ -3082,6 +3690,32 @@ export default function Editor({
           nodeId;
 
         fileInputRef.current?.click();
+      },
+      [],
+    );
+
+  const browseMedia =
+    useCallback(
+      (type: "image" | "video"): void => {
+        const query = window.prompt(
+          `${type === "image" ? "Image" : "Video"} search`,
+          "",
+        );
+
+        if (!query?.trim()) {
+          return;
+        }
+
+        const url =
+          type === "image"
+            ? `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(query)}`
+            : `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+
+        window.open(
+          url,
+          "_blank",
+          "noopener,noreferrer",
+        );
       },
       [],
     );
@@ -3776,6 +4410,22 @@ export default function Editor({
                 {zoom}%
               </span>
 
+              <input
+                aria-label="Canvas zoom"
+                type="range"
+                min="30"
+                max="150"
+                step="5"
+                value={zoom}
+                onChange={(event) =>
+                  setZoom(
+                    Number(
+                      event.target.value,
+                    ),
+                  )
+                }
+              />
+
               <button
                 type="button"
                 onClick={() =>
@@ -3796,14 +4446,10 @@ export default function Editor({
               <button
                 type="button"
                 onClick={() => {
-                  setZoom(75);
-                  setPan({
-                    x: 0,
-                    y: 0,
-                  });
+                  fitCanvas();
                 }}
               >
-                Reset view
+                Fit
               </button>
             </div>
           </div>
@@ -3814,9 +4460,23 @@ export default function Editor({
             onPointerDown={
               startPan
             }
-            onPointerDownCapture={
-              startMarquee
+            onPointerDownCapture={(event) => {
+              if (event.pointerType === "touch") {
+                handleCanvasPointerDown(event);
+              } else {
+                startMarquee(event);
+              }
+            }}
+            onPointerMove={
+              handleCanvasPointerMove
             }
+            onPointerUp={
+              handleCanvasPointerUp
+            }
+            onPointerCancel={
+              handleCanvasPointerUp
+            }
+            onWheel={handleCanvasWheel}
             onDragOver={
               handleDragOver
             }
@@ -3832,7 +4492,7 @@ export default function Editor({
               style={{
                 width: canvasWidth,
                 transform:
-                  `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`,
+                  `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${zoom / 100})`,
               }}
             >
               <div
@@ -3896,14 +4556,6 @@ export default function Editor({
                   ),
                 )}
 
-                {dropTarget && (
-                  <DropIndicator
-                    target={
-                      dropTarget
-                    }
-                  />
-                )}
-
                 {pageSelected && (
                   <div className="page-selection">
                     Page
@@ -3911,6 +4563,12 @@ export default function Editor({
                 )}
               </div>
             </div>
+
+            {dropTarget && (
+              <DropIndicator
+                target={dropTarget}
+              />
+            )}
 
             {marquee && (
               <MarqueeBox
@@ -3939,28 +4597,39 @@ export default function Editor({
             />
           )}
 
-          {selectedNode && (
-            <Inspector
-              node={selectedNode}
-              updateProp={
-                updateProp
-              }
-              updateStyle={
-                updateStyle
-              }
-              uploadImage={
-                uploadImage
-              }
-              numericDrafts={
-                numericDrafts
-              }
-              setNumericDrafts={
-                setNumericDrafts
-              }
-            />
-          )}
+          <Inspector
+            node={selectedNode}
+            selectedNodes={selectedIds
+              .map((id) =>
+                allNodes.find(
+                  (item) => item.id === id,
+                ),
+              )
+              .filter(
+                (item): item is ComponentNode =>
+                  Boolean(item),
+              )}
+            updateProp={
+              updateProp
+            }
+            updateStyle={
+              updateStyle
+            }
+            uploadImage={
+              uploadImage
+            }
+            browseMedia={
+              browseMedia
+            }
+            numericDrafts={
+              numericDrafts
+            }
+            setNumericDrafts={
+              setNumericDrafts
+            }
+          />
 
-          {selectedNode && (
+          {selectedIds.length > 0 && (
             <div className="floating-toolbar editor-ui">
               <span>
                 {
@@ -3977,6 +4646,30 @@ export default function Editor({
               >
                 Duplicate
               </button>
+
+              {selectedIds.length > 1 && (
+                <button
+                  type="button"
+                  onClick={
+                    groupSelected
+                  }
+                >
+                  Group columns
+                </button>
+              )}
+
+              {selectedIds.length === 1 &&
+                selectedNode?.type === "section" &&
+                Boolean(selectedNode.children?.length) && (
+                  <button
+                    type="button"
+                    onClick={
+                      ungroupSelected
+                    }
+                  >
+                    Ungroup
+                  </button>
+                )}
 
               <button
                 type="button"
@@ -4268,17 +4961,81 @@ function DropIndicator({
 }: {
   target: DropTarget;
 }): ReactElement | null {
-  if (!target.id) {
+  const [rect, setRect] =
+    useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    const update = (): void => {
+      const element = target.id
+        ? document.querySelector<HTMLElement>(
+            `[data-sytely-id="${CSS.escape(
+              target.id,
+            )}"]`,
+          )
+        : document.querySelector<HTMLElement>(
+            ".website-page",
+          );
+
+      setRect(
+        element?.getBoundingClientRect() ?? null,
+      );
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [target.id]);
+
+  if (!rect) {
     return null;
   }
 
+  const line =
+    target.position !== "inside";
+  const columns =
+    target.layout === "columns";
+
   return (
     <div
-      className={`drop-indicator ${target.position}`}
-      data-drop-id={
-        target.id
-      }
-    />
+      className={`drop-indicator ${target.position} ${target.layout}`}
+      data-drop-id={target.id ?? "page"}
+      style={{
+        position: "fixed",
+        left: columns && target.position === "after"
+          ? rect.right
+          : rect.left,
+        top:
+          columns
+            ? rect.top
+            : line && target.position === "after"
+            ? rect.bottom
+            : rect.top,
+        width: columns ? 3 : rect.width,
+        height: columns ? rect.height : line ? 3 : rect.height,
+      }}
+    >
+      <strong>
+        {target.position === "inside"
+          ? "Add inside"
+          : target.position === "before"
+            ? "Place before"
+            : "Place after"}
+      </strong>
+      <span>
+        {target.containerLabel}
+        {target.columnCount > 1
+          ? ` · ${target.columnCount} columns`
+          : ""}
+        {target.createsColumns
+          ? " · Creates a column group"
+          : ""}
+      </span>
+    </div>
   );
 }
 
@@ -4475,13 +5232,16 @@ function SelectionOverlay({
 
 function Inspector({
   node,
+  selectedNodes,
   updateProp,
   updateStyle,
   uploadImage,
+  browseMedia,
   numericDrafts,
   setNumericDrafts,
 }: {
-  node: ComponentNode;
+  node: ComponentNode | null;
+  selectedNodes: ComponentNode[];
   updateProp: (
     id: string,
     key: string,
@@ -4495,6 +5255,9 @@ function Inspector({
   uploadImage: (
     id: string,
   ) => void;
+  browseMedia: (
+    type: "image" | "video",
+  ) => void;
   numericDrafts: Record<
     string,
     string
@@ -4505,6 +5268,34 @@ function Inspector({
     >
   >;
 }): ReactElement {
+  if (selectedNodes.length > 1) {
+    return (
+      <MultiInspector
+        nodes={selectedNodes}
+        updateStyle={updateStyle}
+      />
+    );
+  }
+
+  if (!node) {
+    return (
+      <aside className="floating-inspector inspector-empty editor-ui">
+        <div className="inspector-head">
+          <strong>Inspector</strong>
+          <span>Page settings</span>
+        </div>
+
+        <section>
+          <div className="inspector-empty-icon">+</div>
+          <h3>Select an element</h3>
+          <p>
+            Choose a component on the canvas to edit its content, layout, and style.
+          </p>
+        </section>
+      </aside>
+    );
+  }
+
   const textProp = (
     key: string,
     fallback = "",
@@ -4785,26 +5576,48 @@ function Inspector({
             >
               Upload image
             </button>
+
+            <button
+              type="button"
+              className="upload"
+              onClick={() =>
+                browseMedia("image")
+              }
+            >
+              Browse the web
+            </button>
           </>
         )}
 
         {node.type ===
           "video" && (
-          <TextField
-            label="Video URL"
-            value={textProp(
-              "src",
-            )}
-            onChange={(
-              value: string,
-            ) =>
-              updateProp(
-                node.id,
+          <>
+            <TextField
+              label="Video URL"
+              value={textProp(
                 "src",
-                value,
-              )
-            }
-          />
+              )}
+              onChange={(
+                value: string,
+              ) =>
+                updateProp(
+                  node.id,
+                  "src",
+                  value,
+                )
+              }
+            />
+
+            <button
+              type="button"
+              className="upload"
+              onClick={() =>
+                browseMedia("video")
+              }
+            >
+              Browse the web
+            </button>
+          </>
         )}
 
         {node.type ===
@@ -5110,6 +5923,98 @@ function Inspector({
             )
           }
         />
+      </section>
+    </aside>
+  );
+}
+
+function MultiInspector({
+  nodes,
+  updateStyle,
+}: {
+  nodes: ComponentNode[];
+  updateStyle: (
+    id: string,
+    key: string,
+    value: unknown,
+  ) => void;
+}): ReactElement {
+  const setStyle = (
+    key: string,
+    value: unknown,
+  ): void => {
+    nodes.forEach((node) =>
+      updateStyle(node.id, key, value),
+    );
+  };
+
+  const changeSize = (delta: number): void => {
+    nodes.forEach((node) => {
+      const current = safeNumber(
+        node.styles?.width,
+        100,
+      );
+
+      updateStyle(
+        node.id,
+        "width",
+        Math.max(20, current + delta),
+      );
+    });
+  };
+
+  return (
+    <aside className="floating-inspector editor-ui">
+      <div className="inspector-head">
+        <strong>{nodes.length} elements</strong>
+        <span>Multi-selection</span>
+      </div>
+
+      <section>
+        <h3>Align</h3>
+        <div className="inspector-actions">
+          {[
+            ["left", "Align left"],
+            ["center", "Align center"],
+            ["right", "Align right"],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              title={label}
+              onClick={() =>
+                setStyle("textAlign", value)
+              }
+            >
+              {value === "left"
+                ? "≡"
+                : value === "center"
+                  ? "☷"
+                  : "≡"}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
+        <h3>Size</h3>
+        <div className="inspector-actions">
+          <button
+            type="button"
+            onClick={() => changeSize(-10)}
+          >
+            Smaller
+          </button>
+          <button
+            type="button"
+            onClick={() => changeSize(10)}
+          >
+            Larger
+          </button>
+        </div>
+        <p className="inspector-hint">
+          Adjusts compatible widths while preserving each element&apos;s content.
+        </p>
       </section>
     </aside>
   );
