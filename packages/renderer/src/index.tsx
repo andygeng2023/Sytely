@@ -2,6 +2,7 @@ import {
   Fragment,
   createElement,
   type CSSProperties,
+  type FormEvent,
   type ReactNode,
 } from "react";
 import type { ComponentNode } from "@sytely/types";
@@ -12,19 +13,18 @@ export type RenderDevice =
   | "mobile";
 
 export interface RenderOptions {
+  device?: RenderDevice;
   children?: ReactNode;
   renderChildren?: boolean;
-  device?: RenderDevice;
 }
 
 function stringProp(
   props: Record<string, unknown>,
   key: string,
   fallback = ""
-): string {
-  return typeof props[key] ===
-    "string"
-    ? props[key] as string
+) {
+  return typeof props[key] === "string"
+    ? (props[key] as string)
     : fallback;
 }
 
@@ -32,105 +32,96 @@ function numberProp(
   props: Record<string, unknown>,
   key: string,
   fallback: number
-): number {
+) {
   const value = props[key];
 
-  return typeof value ===
-    "number" &&
+  return typeof value === "number" &&
     Number.isFinite(value)
     ? value
     : fallback;
+}
+
+function dataAttrs(node: ComponentNode) {
+  return {
+    "data-sytely-id": node.id,
+    "data-sytely-type": node.type,
+  };
 }
 
 function responsiveStyles(
   node: ComponentNode,
   device: RenderDevice
 ): CSSProperties {
-  const raw = {
+  const source = {
     ...(node.styles ?? {}),
   } as Record<string, unknown>;
 
   const responsive =
-    raw.responsive as
-      | Record<
-          string,
-          unknown
-        >
-      | undefined;
+    (source.responsive ?? {}) as Record<
+      string,
+      unknown
+    >;
 
-  delete raw.responsive;
+  delete source.responsive;
 
   const tablet =
-    (responsive?.tablet as
-      | Record<
-          string,
-          unknown
-        >
-      | undefined) ?? {};
+    (responsive.tablet ?? {}) as Record<
+      string,
+      unknown
+    >;
 
   const mobile =
-    (responsive?.mobile as
-      | Record<
-          string,
-          unknown
-        >
-      | undefined) ?? {};
+    (responsive.mobile ?? {}) as Record<
+      string,
+      unknown
+    >;
 
-  const override =
-    device === "mobile"
+  const result = {
+    ...source,
+    ...(device === "tablet" ? tablet : {}),
+    ...(device === "mobile"
       ? {
           ...tablet,
           ...mobile,
         }
-      : device === "tablet"
-      ? tablet
-      : {};
-
-  const result = {
-    ...raw,
-    ...override,
-  } as CSSProperties;
+      : {}),
+  } as CSSProperties &
+    Record<string, unknown>;
 
   if (
     device !== "desktop" &&
-    typeof result.fontSize ===
-      "number"
+    typeof result.fontSize === "number"
   ) {
-    result.fontSize =
-      Math.max(
-        12,
-        result.fontSize *
-          (device === "mobile"
-            ? 0.72
-            : 0.88)
-      );
+    result.fontSize = Math.max(
+      12,
+      result.fontSize *
+        (device === "mobile"
+          ? 0.76
+          : 0.9)
+    );
   }
 
   if (
     device !== "desktop" &&
-    typeof result.gap ===
-      "number"
+    typeof result.gap === "number"
   ) {
-    result.gap =
-      Math.max(
-        8,
-        result.gap *
-          (device === "mobile"
-            ? 0.75
-            : 0.9)
-      );
+    result.gap = Math.max(
+      8,
+      result.gap *
+        (device === "mobile"
+          ? 0.78
+          : 0.9)
+    );
   }
 
   if (
-    typeof result.width ===
-    "number"
+    typeof result.width === "number"
   ) {
     result.width = `min(${result.width}px,100%)`;
   }
 
   if (
-    typeof result.maxWidth ===
-    "number"
+    typeof result.maxWidth === "number"
   ) {
     result.maxWidth = `min(${result.maxWidth}px,100%)`;
   }
@@ -140,16 +131,14 @@ function responsiveStyles(
     typeof result.gridTemplateColumns ===
       "string"
   ) {
-    const columns =
+    const value =
       result.gridTemplateColumns;
 
-    if (
-      columns.includes(
-        "repeat(4"
-      ) ||
-      columns.includes(
-        "repeat(3"
-      )
+    if (value.includes("repeat(4")) {
+      result.gridTemplateColumns =
+        "repeat(2,minmax(0,1fr))";
+    } else if (
+      value.includes("repeat(3")
     ) {
       result.gridTemplateColumns =
         "repeat(2,minmax(0,1fr))";
@@ -169,33 +158,20 @@ function responsiveStyles(
     }
 
     if (
-      result.flexDirection ===
-      "row"
+      result.flexDirection === "row"
     ) {
-      result.flexDirection =
-        "column";
+      result.flexDirection = "column";
     }
   }
 
   return result;
 }
 
-function dataAttrs(
-  node: ComponentNode
-) {
-  return {
-    "data-sytely-id":
-      node.id,
-    "data-sytely-type":
-      node.type,
-  };
-}
-
-function renderChildren(
-  children: ComponentNode[] | undefined,
+function childNodes(
+  node: ComponentNode,
   device: RenderDevice
-): ReactNode {
-  return (children ?? []).map(
+): ReactNode[] {
+  return (node.children ?? []).map(
     (child) =>
       createElement(
         Fragment,
@@ -207,75 +183,52 @@ function renderChildren(
   );
 }
 
-function withLink(
+function defaultCards(
   node: ComponentNode,
-  content: ReactNode
-): ReactNode {
-  const href =
-    stringProp(
-      node.props,
-      "linkTo"
-    );
+  device: RenderDevice,
+  kind: "features" | "pricing"
+) {
+  const labels =
+    kind === "features"
+      ? [
+          "Visual editing",
+          "Responsive layouts",
+          "Reusable sections",
+        ]
+      : [
+          "Starter",
+          "Pro",
+          "Business",
+        ];
 
-  if (!href) {
-    return content;
-  }
+  return labels.map(
+    (label, index) => {
+      const child: ComponentNode = {
+        id: `${node.id}-${kind}-${index}`,
+        type: "card",
+        props: {
+          title: label,
+          text:
+            kind === "pricing"
+              ? `$${[9, 24, 59][index]} / month`
+              : "A reusable editable content block.",
+        },
+        styles: {
+          minWidth: 0,
+        },
+      };
 
-  return createElement(
-    "a",
-    {
-      href,
-      style: {
-        color: "inherit",
-        textDecoration:
-          "none",
-      },
-    },
-    content
+      return createElement(
+        Fragment,
+        {
+          key: child.id,
+        },
+        renderNode(child, {
+          device,
+        })
+      );
+    }
   );
-}
-
-function responsiveGrid(
-  columns: number,
-  device: RenderDevice
-): CSSProperties {
-  let count = Math.max(
-    1,
-    Math.round(columns)
-  );
-
-  if (device === "tablet") {
-    count = Math.min(
-      count,
-      2
-    );
-  }
-
-  if (device === "mobile") {
-    count = 1;
-  }
-
-  return {
-    display: "grid",
-    gridTemplateColumns: `repeat(${count},minmax(0,1fr))`,
-  };
-}
-
-function renderCardChildren(
-  node: ComponentNode,
-  device: RenderDevice
-): ReactNode {
-  if (
-    node.children &&
-    node.children.length > 0
-  ) {
-    return renderChildren(
-      node.children,
-      device
-    );
-  }
-
-  return null;
 }
 
 export function renderNode(
@@ -283,11 +236,9 @@ export function renderNode(
   options: RenderOptions = {}
 ): ReactNode {
   const device =
-    options.device ??
-    "desktop";
+    options.device ?? "desktop";
 
-  const props =
-    node.props ?? {};
+  const props = node.props ?? {};
 
   const styles =
     responsiveStyles(
@@ -296,237 +247,146 @@ export function renderNode(
     );
 
   const children =
-    options.children !==
-    undefined
+    options.children !== undefined
       ? options.children
-      : options.renderChildren ===
-          false
-      ? null
-      : renderChildren(
-          node.children,
-          device
-        );
+      : options.renderChildren === false
+        ? null
+        : childNodes(
+            node,
+            device
+          );
 
   switch (node.type) {
-    case "section": {
-      const sectionStyles: CSSProperties =
-        {
-          boxSizing:
-            "border-box",
-          width: "100%",
-          display: "grid",
-          gridTemplateColumns:
-            "1fr",
-          gap: 24,
-          paddingTop: 56,
-          paddingRight: 40,
-          paddingBottom: 56,
-          paddingLeft: 40,
-          color:
-            "var(--sytely-text)",
-          background:
-            "var(--sytely-surface)",
-          ...styles,
-        };
-
-      if (
-        device === "tablet"
-      ) {
-        sectionStyles.paddingTop =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingTop,
-              56
-            ),
-            48
-          );
-
-        sectionStyles.paddingBottom =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingBottom,
-              56
-            ),
-            48
-          );
-
-        sectionStyles.paddingLeft =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingLeft,
-              40
-            ),
-            32
-          );
-
-        sectionStyles.paddingRight =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingRight,
-              40
-            ),
-            32
-          );
-      }
-
-      if (
-        device === "mobile"
-      ) {
-        sectionStyles.paddingTop =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingTop,
-              56
-            ),
-            32
-          );
-
-        sectionStyles.paddingBottom =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingBottom,
-              56
-            ),
-            32
-          );
-
-        sectionStyles.paddingLeft =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingLeft,
-              40
-            ),
-            20
-          );
-
-        sectionStyles.paddingRight =
-          Math.min(
-            numberValue(
-              sectionStyles.paddingRight,
-              40
-            ),
-            20
-          );
-      }
-
+    case "section":
       return createElement(
         "section",
         {
           ...dataAttrs(node),
-          style:
-            sectionStyles,
+          style: {
+            boxSizing:
+              "border-box",
+            width: "100%",
+            display: "flex",
+            flexDirection:
+              "column",
+            alignItems:
+              "stretch",
+            justifyContent:
+              "flex-start",
+            gap: 24,
+            padding:
+              "56px 40px",
+            background:
+              "var(--sytely-surface)",
+            color:
+              "var(--sytely-text)",
+            ...styles,
+          },
         },
         children
       );
-    }
 
     case "heading":
-      return withLink(
-        node,
-        createElement(
-          "h2",
-          {
-            ...dataAttrs(node),
-            style: {
-              margin: 0,
-              color:
-                "var(--sytely-text)",
-              lineHeight: 1.12,
-              ...styles,
-            },
+      return createElement(
+        "h2",
+        {
+          ...dataAttrs(node),
+          style: {
+            margin: 0,
+            lineHeight: 1.12,
+            color:
+              "var(--sytely-text)",
+            ...styles,
           },
-          stringProp(
-            props,
-            "text",
-            "Heading"
-          )
+        },
+        stringProp(
+          props,
+          "text",
+          "Heading"
         )
       );
 
     case "text":
-      return withLink(
-        node,
-        createElement(
-          "p",
-          {
-            ...dataAttrs(node),
-            style: {
-              margin: 0,
-              lineHeight: 1.6,
-              color:
-                "var(--sytely-text-muted)",
-              ...styles,
-            },
+      return createElement(
+        "p",
+        {
+          ...dataAttrs(node),
+          style: {
+            margin: 0,
+            lineHeight: 1.6,
+            color:
+              "var(--sytely-text-muted)",
+            ...styles,
           },
-          stringProp(
-            props,
-            "text",
-            "Text"
-          )
+        },
+        stringProp(
+          props,
+          "text",
+          "Text"
         )
       );
 
     case "button": {
-      const style: CSSProperties =
-        {
-          display:
-            "inline-flex",
-          alignItems:
-            "center",
-          justifyContent:
-            "center",
-          width: "fit-content",
-          minHeight: 44,
-          padding:
-            "12px 20px",
-          border: 0,
-          borderRadius: 8,
-          cursor: "pointer",
-          textDecoration:
-            "none",
-          background:
-            "var(--sytely-accent)",
-          color:
-            "var(--sytely-accent-text)",
-          boxSizing:
-            "border-box",
-          ...styles,
-        };
-
-      const label =
-        stringProp(
-          props,
-          "text",
-          "Button"
-        );
-
       const href =
         stringProp(
           props,
           "linkTo"
         );
 
-      if (href) {
-        return createElement(
-          "a",
-          {
-            ...dataAttrs(node),
-            href,
-            style,
-          },
-          label
-        );
-      }
+      const buttonStyle:
+        CSSProperties = {
+        display:
+          "inline-flex",
+        alignItems:
+          "center",
+        justifyContent:
+          "center",
+        width: "fit-content",
+        minHeight: 44,
+        padding:
+          "12px 20px",
+        boxSizing:
+          "border-box",
+        border: 0,
+        borderRadius: 8,
+        background:
+          "var(--sytely-accent)",
+        color:
+          "var(--sytely-accent-text)",
+        textDecoration:
+          "none",
+        ...styles,
+      };
 
-      return createElement(
-        "button",
-        {
-          ...dataAttrs(node),
-          type: "button",
-          style,
-        },
-        label
-      );
+      return href
+        ? createElement(
+            "a",
+            {
+              ...dataAttrs(node),
+              href,
+              style:
+                buttonStyle,
+            },
+            stringProp(
+              props,
+              "text",
+              "Button"
+            )
+          )
+        : createElement(
+            "button",
+            {
+              ...dataAttrs(node),
+              type: "button",
+              style:
+                buttonStyle,
+            },
+            stringProp(
+              props,
+              "text",
+              "Button"
+            )
+          );
     }
 
     case "image": {
@@ -556,11 +416,11 @@ export function renderNode(
               display: "grid",
               placeItems:
                 "center",
-              background:
-                "repeating-linear-gradient(45deg,var(--sytely-placeholder-a) 0,var(--sytely-placeholder-a) 8px,var(--sytely-placeholder-b) 8px,var(--sytely-placeholder-b) 16px)",
+              borderRadius: 10,
               color:
                 "var(--sytely-text-muted)",
-              borderRadius: 10,
+              background:
+                "repeating-linear-gradient(45deg,var(--sytely-placeholder-a) 0,var(--sytely-placeholder-a) 8px,var(--sytely-placeholder-b) 8px,var(--sytely-placeholder-b) 16px)",
               ...styles,
             },
           },
@@ -587,13 +447,7 @@ export function renderNode(
       );
     }
 
-    case "video": {
-      const src =
-        stringProp(
-          props,
-          "src"
-        );
-
+    case "video":
       return createElement(
         "div",
         {
@@ -613,23 +467,26 @@ export function renderNode(
             ...styles,
           },
         },
-        src
+        stringProp(
+          props,
+          "src"
+        )
           ? createElement(
               "video",
               {
-                src,
+                src: stringProp(
+                  props,
+                  "src"
+                ),
                 controls: true,
                 style: {
                   width: "100%",
                   height: "100%",
-                  objectFit:
-                    "cover",
                 },
               }
             )
           : "Video"
       );
-    }
 
     case "gallery": {
       const images =
@@ -645,22 +502,22 @@ export function renderNode(
             )
           : [];
 
-      const columns =
+      const count = Math.max(
+        1,
         numberProp(
           props,
           "columns",
           3
-        );
+        )
+      );
 
       return createElement(
         "div",
         {
           ...dataAttrs(node),
           style: {
-            ...responsiveGrid(
-              columns,
-              device
-            ),
+            display: "grid",
+            gridTemplateColumns: `repeat(${count},minmax(0,1fr))`,
             gap: 12,
             width: "100%",
             ...styles,
@@ -671,16 +528,17 @@ export function renderNode(
             ? images
             : ["", "", ""]
         ).map(
-          (src, index) =>
+          (
+            src,
+            index
+          ) =>
             src
               ? createElement(
                   "img",
                   {
                     key: index,
                     src,
-                    alt: `Gallery image ${
-                      index + 1
-                    }`,
+                    alt: `Gallery image ${index + 1}`,
                     style: {
                       width:
                         "100%",
@@ -697,8 +555,6 @@ export function renderNode(
                   {
                     key: index,
                     style: {
-                      width:
-                        "100%",
                       aspectRatio:
                         "1",
                       borderRadius: 8,
@@ -720,7 +576,7 @@ export function renderNode(
             width: "100%",
             height: 1,
             background:
-              "var(--sytely-text)",
+              "currentColor",
             opacity: 0.15,
             ...styles,
           },
@@ -787,9 +643,8 @@ export function renderNode(
           ...dataAttrs(node),
           style: {
             display: "flex",
-            flexWrap:
-              "wrap",
-            gap: 20,
+            flexWrap: "wrap",
+            gap: 18,
             alignItems:
               "center",
             ...styles,
@@ -828,9 +683,10 @@ export function renderNode(
                 "string"
             )
           : [
-              "Instagram",
-              "X",
-              "LinkedIn",
+              "in",
+              "𝕏",
+              "◎",
+              "f",
             ];
 
       return createElement(
@@ -839,24 +695,28 @@ export function renderNode(
           ...dataAttrs(node),
           style: {
             display: "flex",
-            flexWrap:
-              "wrap",
-            gap: 12,
+            gap: 10,
+            flexWrap: "wrap",
             ...styles,
           },
         },
         items.map(
           (item) =>
             createElement(
-              "a",
+              "span",
               {
                 key: item,
-                href: "#",
                 style: {
-                  color:
-                    "inherit",
-                  textDecoration:
-                    "none",
+                  width: 34,
+                  height: 34,
+                  borderRadius:
+                    "50%",
+                  display: "grid",
+                  placeItems:
+                    "center",
+                  background:
+                    "var(--sytely-card)",
+                  fontWeight: 700,
                 },
               },
               item
@@ -865,52 +725,39 @@ export function renderNode(
       );
     }
 
-    case "form": {
-      const title =
-        stringProp(
-          props,
-          "title",
-          "Contact us"
-        );
-
-      const submit =
-        stringProp(
-          props,
-          "submitLabel",
-          "Send message"
-        );
-
+    case "form":
       return createElement(
         "form",
         {
           ...dataAttrs(node),
           onSubmit: (
-            event: {
-              preventDefault: () => void;
-            }
+            event: FormEvent
           ) =>
             event.preventDefault(),
           style: {
-            display: "flex",
-            flexDirection:
-              "column",
+            display: "grid",
             gap: 12,
+            width: "100%",
+            maxWidth: 560,
             ...styles,
           },
         },
         createElement(
-          "strong",
-          null,
-          title
-        ),
-        createElement(
           "input",
           {
             type: "text",
-            placeholder:
-              "Name",
-            style:
-              formInputStyle,
+            placeholder: "Name",
+            style: {
+              padding:
+                "12px 14px",
+              borderRadius: 8,
+              border:
+                "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
+              background:
+                "var(--sytely-page)",
+              color:
+                "inherit",
+            },
           }
         ),
         createElement(
@@ -919,18 +766,36 @@ export function renderNode(
             type: "email",
             placeholder:
               "Email",
-            style:
-              formInputStyle,
+            style: {
+              padding:
+                "12px 14px",
+              borderRadius: 8,
+              border:
+                "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
+              background:
+                "var(--sytely-page)",
+              color:
+                "inherit",
+            },
           }
         ),
         createElement(
           "textarea",
           {
-            rows: 4,
             placeholder:
               "Message",
-            style:
-              formInputStyle,
+            rows: 4,
+            style: {
+              padding:
+                "12px 14px",
+              borderRadius: 8,
+              border:
+                "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
+              background:
+                "var(--sytely-page)",
+              color:
+                "inherit",
+            },
           }
         ),
         createElement(
@@ -938,8 +803,6 @@ export function renderNode(
           {
             type: "submit",
             style: {
-              width:
-                "fit-content",
               padding:
                 "12px 18px",
               border: 0,
@@ -950,10 +813,13 @@ export function renderNode(
                 "var(--sytely-accent-text)",
             },
           },
-          submit
+          stringProp(
+            props,
+            "submitLabel",
+            "Send message"
+          )
         )
       );
-    }
 
     case "card":
       return createElement(
@@ -961,6 +827,7 @@ export function renderNode(
         {
           ...dataAttrs(node),
           style: {
+            minWidth: 0,
             padding: 24,
             borderRadius: 12,
             background:
@@ -995,167 +862,54 @@ export function renderNode(
             "Card description"
           )
         ),
-        renderCardChildren(
-          node,
-          device
-        )
+        children
       );
 
-    case "features": {
-      const hasChildren =
-        Boolean(
-          node.children?.length
-        );
-
-      const columns =
-        numberProp(
-          props,
-          "columns",
-          3
-        );
-
+    case "features":
       return createElement(
         "div",
         {
           ...dataAttrs(node),
           style: {
-            ...responsiveGrid(
-              columns,
-              device
-            ),
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(3,minmax(0,1fr))",
             gap: 16,
             width: "100%",
             ...styles,
           },
         },
-        hasChildren
-          ? renderChildren(
-              node.children,
-              device
-            )
-          : [
-              "Visual editing",
-              "Responsive layouts",
-              "Reusable sections",
-            ].map(
-              (title) =>
-                createElement(
-                  "article",
-                  {
-                    key: title,
-                    style: {
-                      padding: 22,
-                      background:
-                        "var(--sytely-card)",
-                      borderRadius: 10,
-                    },
-                  },
-                  createElement(
-                    "strong",
-                    null,
-                    title
-                  ),
-                  createElement(
-                    "p",
-                    {
-                      style: {
-                        color:
-                          "var(--sytely-text-muted)",
-                      },
-                    },
-                    "A reusable feature block."
-                  )
-                )
+        node.children?.length
+          ? children
+          : defaultCards(
+              node,
+              device,
+              "features"
             )
       );
-    }
 
-    case "pricing": {
-      const hasChildren =
-        Boolean(
-          node.children?.length
-        );
-
-      const columns =
-        numberProp(
-          props,
-          "columns",
-          3
-        );
-
+    case "pricing":
       return createElement(
         "div",
         {
           ...dataAttrs(node),
           style: {
-            ...responsiveGrid(
-              columns,
-              device
-            ),
+            display: "grid",
+            gridTemplateColumns:
+              "repeat(3,minmax(0,1fr))",
             gap: 16,
             width: "100%",
             ...styles,
           },
         },
-        hasChildren
-          ? renderChildren(
-              node.children,
-              device
-            )
-          : [
-              [
-                "Starter",
-                9,
-              ],
-              ["Pro", 24],
-              ["Business", 59],
-            ].map(
-              ([title, price]) =>
-                createElement(
-                  "article",
-                  {
-                    key:
-                      title as string,
-                    style: {
-                      padding: 24,
-                      background:
-                        "var(--sytely-card)",
-                      borderRadius: 12,
-                    },
-                  },
-                  createElement(
-                    "strong",
-                    null,
-                    title
-                  ),
-                  createElement(
-                    "div",
-                    {
-                      style: {
-                        fontSize:
-                          32,
-                        fontWeight:
-                          800,
-                        margin:
-                          "14px 0",
-                      },
-                    },
-                    `$${price}`
-                  ),
-                  createElement(
-                    "p",
-                    {
-                      style: {
-                        color:
-                          "var(--sytely-text-muted)",
-                      },
-                    },
-                    "Flexible plan for your needs."
-                  )
-                )
+        node.children?.length
+          ? children
+          : defaultCards(
+              node,
+              device,
+              "pricing"
             )
       );
-    }
 
     case "testimonial":
       return createElement(
@@ -1175,12 +929,8 @@ export function renderNode(
         },
         `“${stringProp(
           props,
-          "quote",
-          stringProp(
-            props,
-            "text",
-            "A thoughtful product makes the whole experience easier."
-          )
+          "text",
+          "A thoughtful product makes the experience easier."
         )}”`,
         createElement(
           "footer",
@@ -1202,47 +952,59 @@ export function renderNode(
 
     case "faq":
       return createElement(
-        "details",
+        "div",
         {
           ...dataAttrs(node),
           style: {
+            display: "grid",
+            gap: 8,
             width: "100%",
-            padding: 16,
-            borderRadius: 8,
-            background:
-              "var(--sytely-card)",
             ...styles,
           },
         },
-        createElement(
-          "summary",
-          {
-            style: {
-              cursor:
-                "pointer",
-              fontWeight: 700,
-            },
-          },
-          stringProp(
-            props,
-            "question",
-            "Frequently asked question"
-          )
-        ),
-        createElement(
-          "p",
-          {
-            style: {
-              color:
-                "var(--sytely-text-muted)",
-            },
-          },
-          stringProp(
-            props,
-            "answer",
-            "Edit this answer from the component properties."
-          )
-        )
+        node.children?.length
+          ? children
+          : createElement(
+              "details",
+              {
+                style: {
+                  padding: 16,
+                  borderRadius: 8,
+                  background:
+                    "var(--sytely-card)",
+                },
+              },
+              createElement(
+                "summary",
+                {
+                  style: {
+                    cursor:
+                      "pointer",
+                    fontWeight:
+                      700,
+                  },
+                },
+                stringProp(
+                  props,
+                  "question",
+                  "Frequently asked question"
+                )
+              ),
+              createElement(
+                "p",
+                {
+                  style: {
+                    color:
+                      "var(--sytely-text-muted)",
+                  },
+                },
+                stringProp(
+                  props,
+                  "answer",
+                  "Edit this answer from the inspector."
+                )
+              )
+            )
       );
 
     case "contact":
@@ -1279,24 +1041,21 @@ export function renderNode(
             "hello@example.com"
           )
         ),
-        stringProp(
-          props,
-          "phone"
-        )
-          ? createElement(
-              "span",
-              {
-                style: {
-                  color:
-                    "var(--sytely-text-muted)",
-                },
-              },
-              stringProp(
-                props,
-                "phone"
-              )
-            )
-          : null
+        createElement(
+          "span",
+          {
+            style: {
+              color:
+                "var(--sytely-text-muted)",
+            },
+          },
+          stringProp(
+            props,
+            "phone",
+            "+1 000 000 0000"
+          )
+        ),
+        children
       );
 
     case "footer":
@@ -1318,42 +1077,14 @@ export function renderNode(
           props,
           "text",
           "© 2026 Your brand. All rights reserved."
-        )
+        ),
+        children
       );
 
     default:
       return null;
   }
 }
-
-function numberValue(
-  value: unknown,
-  fallback: number
-): number {
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value)
-  ) {
-    return value;
-  }
-
-  return fallback;
-}
-
-const formInputStyle: CSSProperties =
-  {
-    width: "100%",
-    boxSizing:
-      "border-box",
-    padding:
-      "12px 14px",
-    borderRadius: 8,
-    border:
-      "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
-    background:
-      "var(--sytely-page)",
-    color: "inherit",
-  };
 
 export function SytelyRenderer({
   nodes,
