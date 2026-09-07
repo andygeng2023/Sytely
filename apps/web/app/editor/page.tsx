@@ -1,22 +1,30 @@
 "use client";
 
 import {
+  cloneElement,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
   type DragEvent,
-  type PointerEvent as ReactPointerEvent
+  type PointerEvent as ReactPointerEvent,
+  type ReactElement
 } from "react";
-import { renderNode } from "@sytely/renderer";
-import type { ComponentNode, ComponentType, Site, SitePage } from "@sytely/types";
+import { renderNode, SytelyRenderer } from "@sytely/renderer";
+import type {
+  ComponentNode,
+  ComponentType,
+  Site,
+  SitePage
+} from "@sytely/types";
 import "./editor.css";
 
-type ThemeMode = "system" | "light" | "dark";
+type Device = "desktop" | "tablet" | "mobile";
 type LeftTab = "components" | "templates" | "pages" | "layers";
 type RightTab = "design" | "layout" | "position";
-type Device = "desktop" | "tablet" | "mobile";
+type ThemeMode = "system" | "light" | "dark";
 type DropPosition = "before" | "after" | "inside";
 
 type DragPayload =
@@ -26,7 +34,17 @@ type DragPayload =
 
 interface DropTarget {
   id: string | null;
+  parentId: string | null;
+  index: number;
   position: DropPosition;
+  sectionId: string | null;
+}
+
+interface Template {
+  id: string;
+  name: string;
+  description: string;
+  node: ComponentNode;
 }
 
 interface ResizeState {
@@ -38,27 +56,38 @@ interface ResizeState {
   before: Site;
 }
 
-interface Template {
-  id: string;
-  name: string;
-  description: string;
-  node: ComponentNode;
-}
-
-const DEFAULT_SECTION_PADDING = 56;
 const STORAGE_SITES = "sytely-sites";
 const STORAGE_ACTIVE = "sytely-active-site";
 const STORAGE_LEGACY = "sytely-site";
+const DEFAULT_SECTION_PADDING = 56;
+
+const componentInfo: Record<ComponentType, { icon: string; label: string }> = {
+  section: { icon: "▦", label: "Section" },
+  heading: { icon: "T", label: "Heading" },
+  text: { icon: "≡", label: "Text" },
+  button: { icon: "→", label: "Button" },
+  image: { icon: "▧", label: "Image" },
+  video: { icon: "▶", label: "Video" },
+  gallery: { icon: "▥", label: "Gallery" },
+  divider: { icon: "—", label: "Divider" },
+  icon: { icon: "✦", label: "Icon" },
+  logo: { icon: "◎", label: "Logo" },
+  menu: { icon: "☰", label: "Menu" },
+  social: { icon: "●", label: "Social" },
+  form: { icon: "□", label: "Form" },
+  card: { icon: "▣", label: "Card" },
+  features: { icon: "◆", label: "Features" },
+  pricing: { icon: "$", label: "Pricing" },
+  testimonial: { icon: "“", label: "Testimonial" },
+  faq: { icon: "?", label: "FAQ" },
+  contact: { icon: "@", label: "Contact" },
+  footer: { icon: "▰", label: "Footer" }
+};
 
 function newId() {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return crypto.randomUUID();
-  }
-
-  return `node-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `sytely-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function node(
@@ -79,7 +108,7 @@ function node(
 
 function section(
   id: string,
-  children: ComponentNode[],
+  children: ComponentNode[] = [],
   styles: Record<string, unknown> = {}
 ) {
   return node(
@@ -98,27 +127,63 @@ function section(
   );
 }
 
+function cloneWithNewIds(item: ComponentNode): ComponentNode {
+  return {
+    ...item,
+    id: newId(),
+    props: { ...item.props },
+    styles: {
+      ...(item.styles ?? {}),
+      ...(item.styles?.responsive
+        ? {
+            responsive: {
+              ...(item.styles.responsive as Record<string, unknown>)
+            }
+          }
+        : {})
+    },
+    children: item.children?.map(cloneWithNewIds)
+  };
+}
+
+function starterSection(title: string, copy: string) {
+  return section(newId(), [
+    node(
+      newId(),
+      "heading",
+      { text: title },
+      { fontSize: 44, fontWeight: 750, maxWidth: 760 }
+    ),
+    node(
+      newId(),
+      "text",
+      { text: copy },
+      { fontSize: 18, maxWidth: 720 }
+    )
+  ]);
+}
+
 const templates: Template[] = [
   {
     id: "hero",
     name: "Hero",
-    description: "Centered hero with CTA",
+    description: "Headline, supporting copy and CTA",
     node: section(
-      "tpl-hero",
+      newId(),
       [
         node(
-          "tpl-hero-title",
+          newId(),
           "heading",
           { text: "Build something people remember" },
           {
-            fontSize: 52,
-            fontWeight: 700,
+            fontSize: 54,
+            fontWeight: 750,
             textAlign: "center",
             width: "100%"
           }
         ),
         node(
-          "tpl-hero-copy",
+          newId(),
           "text",
           {
             text: "Create a polished website visually without writing code."
@@ -127,19 +192,14 @@ const templates: Template[] = [
             fontSize: 18,
             textAlign: "center",
             maxWidth: 680,
-            width: "100%",
             alignSelf: "center"
           }
         ),
         node(
-          "tpl-hero-button",
+          newId(),
           "button",
           { text: "Get started" },
-          {
-            background: "var(--sytely-accent)",
-            color: "var(--sytely-accent-text)",
-            alignSelf: "center"
-          }
+          { alignSelf: "center" }
         )
       ],
       {
@@ -151,35 +211,27 @@ const templates: Template[] = [
   {
     id: "split",
     name: "Split",
-    description: "Two-column story section",
+    description: "Responsive text and image layout",
     node: section(
-      "tpl-split",
+      newId(),
       [
         section(
-          "tpl-split-copy",
+          newId(),
           [
             node(
-              "tpl-split-title",
+              newId(),
               "heading",
               { text: "A clear message" },
-              { fontSize: 38, fontWeight: 700 }
+              { fontSize: 38, fontWeight: 750 }
             ),
             node(
-              "tpl-split-text",
+              newId(),
               "text",
               {
-                text: "Pair a strong message with supporting content, imagery, or a call to action."
+                text: "Pair a strong message with supporting content and a clear action."
               }
             ),
-            node(
-              "tpl-split-button",
-              "button",
-              { text: "Learn more" },
-              {
-                background: "var(--sytely-accent)",
-                color: "var(--sytely-accent-text)"
-              }
-            )
+            node(newId(), "button", { text: "Learn more" })
           ],
           {
             padding: 0,
@@ -187,288 +239,168 @@ const templates: Template[] = [
           }
         ),
         node(
-          "tpl-split-image",
+          newId(),
           "image",
           { src: "", alt: "Placeholder image" },
-          {
-            width: "100%",
-            height: 320
-          }
+          { width: 520, height: 320 }
         )
       ],
       {
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))",
-        alignItems: "center",
-        gap: 48,
-        background: "var(--sytely-surface)"
+        gridTemplateColumns: "repeat(2,minmax(0,1fr))",
+        gap: 48
       }
     )
   },
   {
     id: "features",
     name: "Features",
-    description: "Three flexible feature cards",
+    description: "Three responsive feature cards",
     node: section(
-      "tpl-features",
+      newId(),
       [
         node(
-          "tpl-features-title",
+          newId(),
           "heading",
           { text: "Everything in one place" },
           {
             fontSize: 38,
-            fontWeight: 700,
+            fontWeight: 750,
             textAlign: "center"
           }
         ),
         node(
-          "tpl-features-copy",
+          newId(),
           "text",
           {
-            text: "Build pages from reusable sections and normal components."
+            text: "Build pages from reusable sections and components."
           },
           {
             textAlign: "center"
           }
         ),
-        section(
-          "tpl-feature-grid",
-          [
-            section(
-              "tpl-feature-1",
-              [
-                node(
-                  "tpl-feature-1-title",
-                  "heading",
-                  { text: "Visual editing" },
-                  {
-                    fontSize: 22,
-                    fontWeight: 700
-                  }
-                ),
-                node(
-                  "tpl-feature-1-copy",
-                  "text",
-                  {
-                    text: "Move, align, resize and organize directly on the canvas."
-                  }
-                )
-              ],
-              {
-                padding: 28,
-                background: "var(--sytely-card)",
-                gap: 12
-              }
-            ),
-            section(
-              "tpl-feature-2",
-              [
-                node(
-                  "tpl-feature-2-title",
-                  "heading",
-                  { text: "Responsive layouts" },
-                  {
-                    fontSize: 22,
-                    fontWeight: 700
-                  }
-                ),
-                node(
-                  "tpl-feature-2-copy",
-                  "text",
-                  {
-                    text: "Design once and adapt the layout across devices."
-                  }
-                )
-              ],
-              {
-                padding: 28,
-                background: "var(--sytely-card)",
-                gap: 12
-              }
-            ),
-            section(
-              "tpl-feature-3",
-              [
-                node(
-                  "tpl-feature-3-title",
-                  "heading",
-                  { text: "Reusable sections" },
-                  {
-                    fontSize: 22,
-                    fontWeight: 700
-                  }
-                ),
-                node(
-                  "tpl-feature-3-copy",
-                  "text",
-                  {
-                    text: "Start from templates and customize every detail."
-                  }
-                )
-              ],
-              {
-                padding: 28,
-                background: "var(--sytely-card)",
-                gap: 12
-              }
-            )
-          ],
-          {
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
-            padding: 0,
-            gap: 20
-          }
-        )
+        node(newId(), "features")
       ],
       {
-        background: "var(--sytely-surface)",
-        gap: 18
+        alignItems: "stretch"
       }
     )
   },
   {
     id: "stats",
     name: "Stats",
-    description: "Compact metric cards",
+    description: "Compact metrics section",
     node: section(
-      "tpl-stats",
-      [
-        section(
-          "tpl-stat-grid",
-          [
-            section(
-              "tpl-stat-1",
-              [
-                node(
-                  "tpl-stat-1-title",
-                  "heading",
-                  { text: "10k+" },
-                  {
-                    fontSize: 34,
-                    fontWeight: 700
-                  }
-                ),
-                node(
-                  "tpl-stat-1-copy",
-                  "text",
-                  { text: "Projects" }
-                )
-              ],
-              {
-                padding: 24,
-                background: "var(--sytely-card)",
-                alignItems: "center",
-                gap: 8
-              }
-            ),
-            section(
-              "tpl-stat-2",
-              [
-                node(
-                  "tpl-stat-2-title",
-                  "heading",
-                  { text: "99%" },
-                  {
-                    fontSize: 34,
-                    fontWeight: 700
-                  }
-                ),
-                node(
-                  "tpl-stat-2-copy",
-                  "text",
-                  { text: "Satisfaction" }
-                )
-              ],
-              {
-                padding: 24,
-                background: "var(--sytely-card)",
-                alignItems: "center",
-                gap: 8
-              }
-            ),
-            section(
-              "tpl-stat-3",
-              [
-                node(
-                  "tpl-stat-3-title",
-                  "heading",
-                  { text: "24/7" },
-                  {
-                    fontSize: 34,
-                    fontWeight: 700
-                  }
-                ),
-                node(
-                  "tpl-stat-3-copy",
-                  "text",
-                  { text: "Availability" }
-                )
-              ],
-              {
-                padding: 24,
-                background: "var(--sytely-card)",
-                alignItems: "center",
-                gap: 8
-              }
-            )
-          ],
-          {
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
-            padding: 0,
-            gap: 20
-          }
-        )
-      ],
+      newId(),
+      [node(newId(), "features", { mode: "stats" })],
       {
-        background: "var(--sytely-surface)"
+        alignItems: "stretch"
       }
     )
   },
   {
-    id: "cta",
-    name: "CTA",
-    description: "Focused call to action",
+    id: "pricing",
+    name: "Pricing",
+    description: "Three plan comparison cards",
+    node: section(newId(), [
+      node(
+        newId(),
+        "heading",
+        { text: "Simple pricing" },
+        {
+          fontSize: 40,
+          fontWeight: 750,
+          textAlign: "center"
+        }
+      ),
+      node(
+        newId(),
+        "text",
+        {
+          text: "Choose the plan that fits your next project."
+        },
+        {
+          textAlign: "center"
+        }
+      ),
+      node(newId(), "pricing")
+    ])
+  },
+  {
+    id: "testimonial",
+    name: "Testimonial",
+    description: "Customer quote with attribution",
     node: section(
-      "tpl-cta",
+      newId(),
       [
-        node(
-          "tpl-cta-title",
-          "heading",
-          { text: "Ready to build your next page?" },
-          {
-            fontSize: 38,
-            fontWeight: 700,
-            textAlign: "center"
-          }
-        ),
-        node(
-          "tpl-cta-copy",
-          "text",
-          {
-            text: "Start with a section and customize every part."
-          },
-          {
-            textAlign: "center"
-          }
-        ),
-        node(
-          "tpl-cta-button",
-          "button",
-          { text: "Start building" },
-          {
-            background: "var(--sytely-accent)",
-            color: "var(--sytely-accent-text)",
-            alignSelf: "center"
-          }
-        )
+        node(newId(), "testimonial", {
+          text: "Sytely made our site structure much easier to iterate.",
+          author: "Alex Morgan"
+        })
       ],
       {
+        alignItems: "center"
+      }
+    )
+  },
+  {
+    id: "faq",
+    name: "FAQ",
+    description: "Expandable questions and answers",
+    node: section(newId(), [
+      node(
+        newId(),
+        "heading",
+        { text: "Frequently asked questions" },
+        {
+          fontSize: 38,
+          fontWeight: 750
+        }
+      ),
+      node(newId(), "faq")
+    ])
+  },
+  {
+    id: "contact",
+    name: "Contact",
+    description: "Contact details and message form",
+    node: section(newId(), [
+      node(
+        newId(),
+        "heading",
+        { text: "Let's talk" },
+        {
+          fontSize: 40,
+          fontWeight: 750
+        }
+      ),
+      node(
+        newId(),
+        "text",
+        {
+          text: "Tell us what you are building and how we can help."
+        }
+      ),
+      node(newId(), "form")
+    ])
+  },
+  {
+    id: "footer",
+    name: "Footer",
+    description: "Responsive footer navigation",
+    node: section(
+      newId(),
+      [
+        node(newId(), "logo", { text: "Sytely" }),
+        node(newId(), "menu"),
+        node(newId(), "social")
+      ],
+      {
+        display: "grid",
+        gridTemplateColumns: "1fr auto auto",
         alignItems: "center",
-        gap: 18,
-        background: "var(--sytely-muted)"
+        paddingTop: 32,
+        paddingBottom: 32
       }
     )
   }
@@ -477,7 +409,7 @@ const templates: Template[] = [
 const initialSite: Site = {
   id: "site-1",
   name: "Sytely Site",
-  version: 1,
+  version: 2,
   theme: "system",
   pages: [
     {
@@ -494,7 +426,12 @@ const initialSite: Site = {
         background: "var(--sytely-page)",
         theme: "system"
       },
-      components: [templates[0].node, templates[2].node]
+      components: [
+        cloneWithNewIds(templates[0].node),
+        cloneWithNewIds(templates[2].node),
+        cloneWithNewIds(templates[1].node),
+        cloneWithNewIds(templates[7].node)
+      ]
     },
     {
       id: "page-about",
@@ -510,30 +447,81 @@ const initialSite: Site = {
         background: "var(--sytely-page)",
         theme: "system"
       },
-      components: []
+      components: [
+        starterSection(
+          "A better way to build",
+          "Design pages visually, keep reusable sections organized, and switch between responsive breakpoints without rebuilding your layout."
+        )
+      ]
+    },
+    {
+      id: "page-services",
+      name: "Services",
+      slug: "/services",
+      margins: {
+        top: 0,
+        right: 32,
+        bottom: 0,
+        left: 32
+      },
+      styles: {
+        background: "var(--sytely-page)",
+        theme: "system"
+      },
+      components: [
+        cloneWithNewIds(templates[2].node),
+        cloneWithNewIds(templates[1].node)
+      ]
+    },
+    {
+      id: "page-pricing",
+      name: "Pricing",
+      slug: "/pricing",
+      margins: {
+        top: 0,
+        right: 32,
+        bottom: 0,
+        left: 32
+      },
+      styles: {
+        background: "var(--sytely-page)",
+        theme: "system"
+      },
+      components: [
+        cloneWithNewIds(templates[4].node),
+        cloneWithNewIds(templates[6].node)
+      ]
+    },
+    {
+      id: "page-contact",
+      name: "Contact",
+      slug: "/contact",
+      margins: {
+        top: 0,
+        right: 32,
+        bottom: 0,
+        left: 32
+      },
+      styles: {
+        background: "var(--sytely-page)",
+        theme: "system"
+      },
+      components: [
+        cloneWithNewIds(templates[0].node),
+        cloneWithNewIds(templates[2].node),
+        cloneWithNewIds(templates[1].node),
+        cloneWithNewIds(templates[7].node)
+      ]
     }
   ]
 };
 
-function cloneWithNewIds(input: ComponentNode): ComponentNode {
-  return {
-    ...input,
-    id: newId(),
-    props: { ...input.props },
-    styles: { ...(input.styles ?? {}) },
-    children: input.children?.map(cloneWithNewIds)
-  };
-}
-
 function makeComponent(type: ComponentType): ComponentNode {
   const id = newId();
 
-  if (type === "section") {
-    return section(id, []);
-  }
-
-  if (type === "heading") {
-    return node(
+  const defaults: Record<ComponentType, ComponentNode> = {
+    section: section(id),
+    heading: node(
       id,
       "heading",
       { text: "Heading" },
@@ -541,17 +529,14 @@ function makeComponent(type: ComponentType): ComponentNode {
         fontSize: 32,
         fontWeight: 700
       }
-    );
-  }
-
-  if (type === "text") {
-    return node(id, "text", {
+    ),
+    text: node(id, "text", {
       text: "Add your text here."
-    });
-  }
-
-  if (type === "image") {
-    return node(
+    }),
+    button: node(id, "button", {
+      text: "Button"
+    }),
+    image: node(
       id,
       "image",
       {
@@ -562,30 +547,60 @@ function makeComponent(type: ComponentType): ComponentNode {
         width: 360,
         height: 240
       }
-    );
-  }
+    ),
+    video: node(id, "video", {
+      src: ""
+    }),
+    gallery: node(id, "gallery", {
+      images: ["", "", ""]
+    }),
+    divider: node(id, "divider"),
+    icon: node(id, "icon", {
+      icon: "✦"
+    }),
+    logo: node(id, "logo", {
+      text: "Brand"
+    }),
+    menu: node(id, "menu", {
+      items: ["Home", "About", "Contact"]
+    }),
+    social: node(id, "social"),
+    form: node(id, "form"),
+    card: node(
+      id,
+      "card",
+      {
+        title: "Card title",
+        text: "Card description"
+      }
+    ),
+    features: node(id, "features"),
+    pricing: node(id, "pricing"),
+    testimonial: node(id, "testimonial", {
+      text: "A thoughtful product makes the experience easier.",
+      author: "Customer"
+    }),
+    faq: node(id, "faq"),
+    contact: node(id, "contact", {
+      email: "hello@example.com",
+      phone: "+1 000 000 0000"
+    }),
+    footer: node(id, "footer", {
+      text: "© 2026 Your brand. All rights reserved."
+    })
+  };
 
-  return node(
-    id,
-    "button",
-    {
-      text: "Button"
-    },
-    {
-      background: "var(--sytely-accent)",
-      color: "var(--sytely-accent-text)"
-    }
-  );
+  return defaults[type];
 }
 
 function collectNodes(
   nodes: ComponentNode[],
   result: ComponentNode[] = []
 ) {
-  for (const item of nodes) {
+  nodes.forEach((item) => {
     result.push(item);
     collectNodes(item.children ?? [], result);
-  }
+  });
 
   return result;
 }
@@ -595,15 +610,11 @@ function findNode(
   id: string
 ): ComponentNode | null {
   for (const item of nodes) {
-    if (item.id === id) {
-      return item;
-    }
+    if (item.id === id) return item;
 
     const found = findNode(item.children ?? [], id);
 
-    if (found) {
-      return found;
-    }
+    if (found) return found;
   }
 
   return null;
@@ -615,9 +626,7 @@ function findParentId(
   parentId: string | null = null
 ): string | null {
   for (const item of nodes) {
-    if (item.id === childId) {
-      return parentId;
-    }
+    if (item.id === childId) return parentId;
 
     const found = findParentId(
       item.children ?? [],
@@ -625,12 +634,19 @@ function findParentId(
       item.id
     );
 
-    if (found !== null) {
-      return found;
-    }
+    if (found !== null) return found;
   }
 
   return null;
+}
+
+function findSiblingList(
+  nodes: ComponentNode[],
+  parentId: string | null
+): ComponentNode[] {
+  if (parentId === null) return nodes;
+
+  return findNode(nodes, parentId)?.children ?? [];
 }
 
 function containsNode(
@@ -645,155 +661,6 @@ function containsNode(
   );
 }
 
-function removeNode(
-  nodes: ComponentNode[],
-  id: string
-): {
-  nodes: ComponentNode[];
-  removed: ComponentNode | null;
-} {
-  let removed: ComponentNode | null = null;
-  const result: ComponentNode[] = [];
-
-  for (const item of nodes) {
-    if (item.id === id) {
-      removed = item;
-      continue;
-    }
-
-    const child = removeNode(
-      item.children ?? [],
-      id
-    );
-
-    if (child.removed) {
-      removed = child.removed;
-    }
-
-    result.push({
-      ...item,
-      children:
-        item.children !== undefined
-          ? child.nodes
-          : undefined
-    });
-  }
-
-  return {
-    nodes: result,
-    removed
-  };
-}
-
-function removeNodes(
-  nodes: ComponentNode[],
-  ids: Set<string>
-): {
-  nodes: ComponentNode[];
-  removed: ComponentNode[];
-} {
-  const removed: ComponentNode[] = [];
-  const result: ComponentNode[] = [];
-
-  for (const item of nodes) {
-    if (ids.has(item.id)) {
-      removed.push(item);
-      continue;
-    }
-
-    const child = removeNodes(
-      item.children ?? [],
-      ids
-    );
-
-    removed.push(...child.removed);
-
-    result.push({
-      ...item,
-      children:
-        item.children !== undefined
-          ? child.nodes
-          : undefined
-    });
-  }
-
-  return {
-    nodes: result,
-    removed
-  };
-}
-
-function insertNode(
-  nodes: ComponentNode[],
-  targetId: string,
-  items: ComponentNode[],
-  position: DropPosition
-): ComponentNode[] {
-  const result: ComponentNode[] = [];
-
-  for (const item of nodes) {
-    if (item.id === targetId) {
-      if (position === "before") {
-        result.push(...items, item);
-      } else if (position === "after") {
-        result.push(item, ...items);
-      } else {
-        result.push({
-          ...item,
-          children: [
-            ...(item.children ?? []),
-            ...items
-          ]
-        });
-      }
-
-      continue;
-    }
-
-    result.push({
-      ...item,
-      children:
-        item.children !== undefined
-          ? insertNode(
-              item.children,
-              targetId,
-              items,
-              position
-            )
-          : undefined
-    });
-  }
-
-  return result;
-}
-
-function replaceNodeWithChildren(
-  nodes: ComponentNode[],
-  id: string
-): ComponentNode[] {
-  const result: ComponentNode[] = [];
-
-  for (const item of nodes) {
-    if (item.id === id) {
-      result.push(...(item.children ?? []));
-      continue;
-    }
-
-    result.push({
-      ...item,
-      children:
-        item.children !== undefined
-          ? replaceNodeWithChildren(
-              item.children,
-              id
-            )
-          : undefined
-    });
-  }
-
-  return result;
-}
-
 function updateNode(
   nodes: ComponentNode[],
   id: string,
@@ -804,14 +671,9 @@ function updateNode(
       ? updater(item)
       : {
           ...item,
-          children:
-            item.children !== undefined
-              ? updateNode(
-                  item.children,
-                  id,
-                  updater
-                )
-              : undefined
+          children: item.children
+            ? updateNode(item.children, id, updater)
+            : undefined
         }
   );
 }
@@ -826,28 +688,146 @@ function updateMany(
       ? updater(item)
       : {
           ...item,
-          children:
-            item.children !== undefined
-              ? updateMany(
-                  item.children,
-                  ids,
-                  updater
-                )
-              : undefined
+          children: item.children
+            ? updateMany(item.children, ids, updater)
+            : undefined
         }
   );
 }
 
+function removeNodes(
+  nodes: ComponentNode[],
+  ids: Set<string>
+): {
+  nodes: ComponentNode[];
+  removed: ComponentNode[];
+} {
+  const removed: ComponentNode[] = [];
+  const result: ComponentNode[] = [];
+
+  nodes.forEach((item) => {
+    if (ids.has(item.id)) {
+      removed.push(item);
+    } else {
+      const child = removeNodes(
+        item.children ?? [],
+        ids
+      );
+
+      removed.push(...child.removed);
+
+      result.push({
+        ...item,
+        children: item.children
+          ? child.nodes
+          : undefined
+      });
+    }
+  });
+
+  return {
+    nodes: result,
+    removed
+  };
+}
+
+function insertAt(
+  nodes: ComponentNode[],
+  parentId: string | null,
+  index: number,
+  items: ComponentNode[]
+): ComponentNode[] {
+  if (parentId === null) {
+    const copy = [...nodes];
+
+    copy.splice(
+      Math.max(0, Math.min(index, copy.length)),
+      0,
+      ...items
+    );
+
+    return copy;
+  }
+
+  return nodes.map((item) =>
+    item.id === parentId
+      ? {
+          ...item,
+          children: (() => {
+            const copy = [...(item.children ?? [])];
+
+            copy.splice(
+              Math.max(
+                0,
+                Math.min(index, copy.length)
+              ),
+              0,
+              ...items
+            );
+
+            return copy;
+          })()
+        }
+      : {
+          ...item,
+          children: item.children
+            ? insertAt(
+                item.children,
+                parentId,
+                index,
+                items
+              )
+            : undefined
+        }
+  );
+}
+
+function replaceWithChildren(
+  nodes: ComponentNode[],
+  id: string
+): ComponentNode[] {
+  const result: ComponentNode[] = [];
+
+  nodes.forEach((item) => {
+    if (item.id === id) {
+      result.push(...(item.children ?? []));
+    } else {
+      result.push({
+        ...item,
+        children: item.children
+          ? replaceWithChildren(item.children, id)
+          : undefined
+      });
+    }
+  });
+
+  return result;
+}
+
+function removeSingle(
+  nodes: ComponentNode[],
+  id: string
+): ComponentNode[] {
+  return nodes
+    .filter((item) => item.id !== id)
+    .map((item) => ({
+      ...item,
+      children: item.children
+        ? removeSingle(item.children, id)
+        : undefined
+    }));
+}
+
 function parseNumber(
   value: unknown,
-  fallback: number
+  fallback = 0
 ) {
-  const parsed = Number.parseFloat(
+  const number = Number.parseFloat(
     String(value ?? "")
   );
 
-  return Number.isFinite(parsed)
-    ? parsed
+  return Number.isFinite(number)
+    ? number
     : fallback;
 }
 
@@ -856,6 +836,14 @@ function styleValue(
   key: string
 ) {
   return item.styles?.[key];
+}
+
+function themeVars(
+  theme: ThemeMode
+): CSSProperties {
+  return {
+    ["--sytely-theme-mode" as string]: theme
+  } as CSSProperties;
 }
 
 function defaultPage(
@@ -881,29 +869,18 @@ function defaultPage(
   };
 }
 
-function themeVars(
-  theme: ThemeMode
-): CSSProperties {
-  return {
-    ["--sytely-theme-mode" as string]: theme
-  } as CSSProperties;
-}
-
 function EditorNode({
-  nodeItem,
+  item,
   selectedIds,
-  dropTarget,
   onSelect,
   onDragStart,
+  onDragEnd,
   onDragOver,
   onDrop,
-  onDragEnd,
-  onResizeStart,
-  onDelete
+  device
 }: {
-  nodeItem: ComponentNode;
+  item: ComponentNode;
   selectedIds: string[];
-  dropTarget: DropTarget | null;
   onSelect: (
     id: string,
     additive: boolean
@@ -912,6 +889,7 @@ function EditorNode({
     event: DragEvent,
     id: string
   ) => void;
+  onDragEnd: () => void;
   onDragOver: (
     event: DragEvent,
     item: ComponentNode
@@ -920,203 +898,174 @@ function EditorNode({
     event: DragEvent,
     item?: ComponentNode
   ) => void;
-  onDragEnd: () => void;
-  onResizeStart: (
-    event: ReactPointerEvent<HTMLDivElement>,
-    id: string
-  ) => void;
-  onDelete: (id: string) => void;
+  device: Device;
 }) {
-  const selected = selectedIds.includes(
-    nodeItem.id
-  );
-  const children = nodeItem.children ?? [];
+  const selected = selectedIds.includes(item.id);
+  const children = item.children ?? [];
 
-  const dropClass =
-    dropTarget?.id === nodeItem.id
-      ? `drop-${dropTarget?.position}`
+  const content = renderNode(item, {
+    device,
+    children:
+      item.type === "section"
+        ? children.map((child) => (
+            <EditorNode
+              key={child.id}
+              item={child}
+              selectedIds={selectedIds}
+              onSelect={onSelect}
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              onDragOver={onDragOver}
+              onDrop={onDrop}
+              device={device}
+            />
+          ))
+        : undefined,
+    renderChildren: item.type !== "section"
+  });
+
+  if (
+    !content ||
+    typeof content !== "object" ||
+    !("type" in content)
+  ) {
+    return null;
+  }
+
+  const element =
+    content as ReactElement<
+      Record<string, unknown>
+    >;
+
+  const originalClass =
+    typeof element.props.className === "string"
+      ? element.props.className
       : "";
 
-  const visual =
-    nodeItem.type === "section"
-      ? renderNode(nodeItem, {
-          children: children.length ? (
-            <>
-              {children.map((child) => (
-                <EditorNode
-                  key={child.id}
-                  nodeItem={child}
-                  selectedIds={selectedIds}
-                  dropTarget={dropTarget}
-                  onSelect={onSelect}
-                  onDragStart={onDragStart}
-                  onDragOver={onDragOver}
-                  onDrop={onDrop}
-                  onDragEnd={onDragEnd}
-                  onResizeStart={onResizeStart}
-                  onDelete={onDelete}
-                />
-              ))}
-            </>
-          ) : (
-            <div className="empty-section">
-              Drop components here
-            </div>
-          )
-        })
-      : renderNode(nodeItem, {
-          renderChildren: false
-        });
+  return cloneElement(element, {
+    ...element.props,
 
-  return (
-    <div
-      className={[
-        "editor-node",
-        nodeItem.type === "section"
-          ? "section-node"
-          : "",
-        selected ? "selected" : "",
-        dropClass
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      data-editor-node-id={nodeItem.id}
-      draggable
-      onDragStart={(event) =>
-        onDragStart(event, nodeItem.id)
-      }
-      onDragEnd={onDragEnd}
-      onDragOver={(event) =>
-        onDragOver(event, nodeItem)
-      }
-      onDrop={(event) =>
-        onDrop(event, nodeItem)
-      }
-      onPointerDown={(event) => {
-        if (event.button !== 0) {
-          return;
-        }
+    "data-editor-node-id": item.id,
 
-        event.stopPropagation();
+    draggable: true,
 
-        onSelect(
-          nodeItem.id,
-          event.shiftKey ||
-            event.metaKey ||
-            event.ctrlKey
-        );
-      }}
-    >
-      <div className="node-visual">
-        {visual}
-      </div>
+    onDragStart: (event: DragEvent) => {
+      onDragStart(event, item.id);
+    },
 
-      {nodeItem.type === "section" &&
-        selected && (
-          <div className="padding-overlay">
-            <span>padding</span>
-          </div>
-        )}
+    onDragEnd,
 
-      {selected && (
-        <>
-          <div className="node-label">
-            {nodeItem.type}
-          </div>
+    onDragOver: (event: DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onDragOver(event, item);
+    },
 
-          <div
-            className="resize-handle resize-right"
-            onPointerDown={(event) =>
-              onResizeStart(
-                event,
-                nodeItem.id
-              )
-            }
-          />
+    onDrop: (event: DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onDrop(event, item);
+    },
 
-          <div
-            className="resize-handle resize-bottom"
-            onPointerDown={(event) =>
-              onResizeStart(
-                event,
-                nodeItem.id
-              )
-            }
-          />
+    onClick: (event: unknown) => {
+      const mouseEvent = event as {
+        preventDefault?: () => void;
+        stopPropagation?: () => void;
+      };
 
-          <div
-            className="resize-handle resize-corner"
-            onPointerDown={(event) =>
-              onResizeStart(
-                event,
-                nodeItem.id
-              )
-            }
-          />
+      mouseEvent.preventDefault?.();
+      mouseEvent.stopPropagation?.();
+    },
 
-          <button
-            type="button"
-            className="node-delete"
-            onPointerDown={(event) =>
-              event.stopPropagation()
-            }
-            onClick={(event) => {
-              event.stopPropagation();
-              onDelete(nodeItem.id);
-            }}
-          >
-            ×
-          </button>
-        </>
-      )}
-    </div>
-  );
+    onPointerDown: (
+      event: ReactPointerEvent<HTMLElement>
+    ) => {
+      if (event.button !== 0) return;
+
+      event.stopPropagation();
+
+      onSelect(
+        item.id,
+        event.shiftKey ||
+          event.metaKey ||
+          event.ctrlKey
+      );
+    },
+
+    className:
+      `${originalClass} sytely-editor-target ${
+        selected
+          ? "sytely-editor-selected"
+          : ""
+      }`.trim()
+  });
 }
 
 export default function EditorPage() {
   const [site, setSite] =
     useState<Site>(initialSite);
-  const [sites, setSites] = useState<Site[]>([
-    initialSite
-  ]);
+
+  const [sites, setSites] =
+    useState<Site[]>([initialSite]);
 
   const [activePageId, setActivePageId] =
     useState("page-home");
+
   const [selectedIds, setSelectedIds] =
     useState<string[]>([]);
+
   const [pageSelected, setPageSelected] =
     useState(true);
-  const [dropTarget, setDropTarget] =
-    useState<DropTarget | null>(null);
-  const [dragLabel, setDragLabel] =
-    useState<string | null>(null);
-  const [dragPoint, setDragPoint] = useState({
-    x: 0,
-    y: 0
-  });
-  const [zoom, setZoom] = useState(72);
-  const [preview, setPreview] =
-    useState(false);
-  const [device, setDevice] =
-    useState<Device>("desktop");
+
   const [leftTab, setLeftTab] =
     useState<LeftTab>("components");
+
   const [rightTab, setRightTab] =
     useState<RightTab>("design");
+
+  const [device, setDevice] =
+    useState<Device>("desktop");
+
+  const [zoom, setZoom] =
+    useState(72);
+
+  const [search, setSearch] =
+    useState("");
+
+  const [preview, setPreview] =
+    useState(false);
+
+  const [dragLabel, setDragLabel] =
+    useState<string | null>(null);
+
+  const [dropTarget, setDropTarget] =
+    useState<DropTarget | null>(null);
+
   const [history, setHistory] =
     useState<Site[]>([]);
+
   const [future, setFuture] =
     useState<Site[]>([]);
+
+  const [notice, setNotice] =
+    useState("Saved");
+
+  const [dirty, setDirty] =
+    useState(false);
+
+  const [marquee, setMarquee] =
+    useState<{
+      startX: number;
+      startY: number;
+      currentX: number;
+      currentY: number;
+    } | null>(null);
+
   const [resizeState, setResizeState] =
     useState<ResizeState | null>(null);
-  const [marquee, setMarquee] = useState<{
-    startX: number;
-    startY: number;
-    currentX: number;
-    currentY: number;
-  } | null>(null);
-  const [notice, setNotice] =
-    useState("Saved locally");
+
+  const [, setLayoutTick] =
+    useState(0);
 
   const canvasRef =
     useRef<HTMLDivElement | null>(null);
@@ -1143,41 +1092,133 @@ export default function EditorPage() {
   );
 
   const selectedNode =
-    selectedIds.length === 1
-      ? allNodes.find(
-          (item) =>
-            item.id === selectedIds[0]
-        ) ?? null
+    selectedNodes.length === 1
+      ? selectedNodes[0]
       : null;
 
   const theme =
     String(
-      activePage?.styles?.theme ??
-        "system"
+      activePage?.styles?.theme ?? "system"
     ) as ThemeMode;
+
+  const activePageBackground =
+    String(
+      activePage?.styles?.background ??
+        "var(--sytely-page)"
+    );
+
+  const canvasWidth =
+    device === "mobile"
+      ? 390
+      : device === "tablet"
+        ? 768
+        : 1180;
+
+  const persist = useCallback(
+    (next: Site) => {
+      try {
+        const raw =
+          window.localStorage.getItem(
+            STORAGE_SITES
+          );
+
+        const current: Site[] = raw
+          ? JSON.parse(raw)
+          : [];
+
+        const merged = current.some(
+          (item) => item.id === next.id
+        )
+          ? current.map((item) =>
+              item.id === next.id
+                ? next
+                : item
+            )
+          : [...current, next];
+
+        window.localStorage.setItem(
+          STORAGE_SITES,
+          JSON.stringify(merged)
+        );
+
+        window.localStorage.setItem(
+          STORAGE_ACTIVE,
+          next.id
+        );
+
+        window.localStorage.setItem(
+          STORAGE_LEGACY,
+          JSON.stringify(next)
+        );
+
+        setSites(merged);
+        setNotice("Saved");
+        setDirty(false);
+      } catch {
+        setNotice("Save failed");
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const refreshOverlay = () =>
+      setLayoutTick(
+        (value) => value + 1
+      );
+
+    const element =
+      canvasRef.current;
+
+    window.addEventListener(
+      "resize",
+      refreshOverlay
+    );
+
+    element?.addEventListener(
+      "scroll",
+      refreshOverlay,
+      {
+        passive: true
+      }
+    );
+
+    return () => {
+      window.removeEventListener(
+        "resize",
+        refreshOverlay
+      );
+
+      element?.removeEventListener(
+        "scroll",
+        refreshOverlay
+      );
+    };
+  }, []);
 
   useEffect(() => {
     try {
-      const rawSites =
+      const raw =
         window.localStorage.getItem(
           STORAGE_SITES
         );
+
       const legacy =
         window.localStorage.getItem(
           STORAGE_LEGACY
         );
 
-      let loaded: Site[] = rawSites
-        ? JSON.parse(rawSites)
-        : [];
+      const parsed = raw
+        ? JSON.parse(raw)
+        : legacy
+          ? [JSON.parse(legacy)]
+          : [initialSite];
 
-      if (!loaded.length && legacy) {
-        loaded = [JSON.parse(legacy)];
-      }
-
-      if (!loaded.length) {
-        loaded = [initialSite];
-      }
+      const loaded: Site[] =
+        Array.isArray(parsed) &&
+        parsed.length
+          ? parsed
+          : [initialSite];
 
       const activeId =
         window.localStorage.getItem(
@@ -1198,76 +1239,25 @@ export default function EditorPage() {
     } catch {
       setSites([initialSite]);
       setSite(initialSite);
+      setActivePageId("page-home");
     }
   }, []);
-
-  useEffect(() => {
-    if (!site) {
-      return;
-    }
-
-    const timer =
-      window.setTimeout(() => {
-        try {
-          const raw =
-            window.localStorage.getItem(
-              STORAGE_SITES
-            );
-
-          const currentSites: Site[] = raw
-            ? JSON.parse(raw)
-            : [];
-
-          const next =
-            currentSites.some(
-              (item) =>
-                item.id === site.id
-            )
-              ? currentSites.map((item) =>
-                  item.id === site.id
-                    ? site
-                    : item
-                )
-              : [
-                  ...currentSites,
-                  site
-                ];
-
-          window.localStorage.setItem(
-            STORAGE_SITES,
-            JSON.stringify(next)
-          );
-
-          window.localStorage.setItem(
-            STORAGE_ACTIVE,
-            site.id
-          );
-
-          window.localStorage.setItem(
-            STORAGE_LEGACY,
-            JSON.stringify(site)
-          );
-
-          setSites(next);
-          setNotice("Saved locally");
-        } catch {
-          setNotice("Could not save");
-        }
-      }, 250);
-
-    return () =>
-      window.clearTimeout(timer);
-  }, [site]);
 
   function commit(
     updater: (current: Site) => Site
   ) {
     setHistory((items) => [
-      ...items.slice(-39),
+      ...items.slice(-49),
       site
     ]);
+
     setFuture([]);
-    setSite(updater(site));
+
+    setSite((current) =>
+      updater(current)
+    );
+
+    setDirty(true);
     setNotice("Unsaved changes");
   }
 
@@ -1285,29 +1275,14 @@ export default function EditorPage() {
     }));
   }
 
-  function updatePageImmediate(
-    updater: (page: SitePage) => SitePage
-  ) {
-    setSite((current) => ({
-      ...current,
-      pages: current.pages.map(
-        (page) =>
-          page.id === activePageId
-            ? updater(page)
-            : page
-      )
-    }));
-
-    setNotice("Unsaved changes");
-  }
-
-  function setNodeStyle(
+  function updateNodeStyles(
     key: string,
     value: unknown
   ) {
-    if (!selectedIds.length) {
-      return;
-    }
+    if (!selectedIds.length) return;
+
+    const selectedSet =
+      new Set(selectedIds);
 
     commit((current) => ({
       ...current,
@@ -1319,14 +1294,11 @@ export default function EditorPage() {
                 components:
                   updateMany(
                     page.components,
-                    new Set(
-                      selectedIds
-                    ),
+                    selectedSet,
                     (item) => ({
                       ...item,
                       styles: {
-                        ...(item.styles ??
-                          {}),
+                        ...(item.styles ?? {}),
                         [key]: value
                       }
                     })
@@ -1337,13 +1309,11 @@ export default function EditorPage() {
     }));
   }
 
-  function setNodeProp(
+  function updateNodeProp(
     key: string,
     value: unknown
   ) {
-    if (!selectedNode) {
-      return;
-    }
+    if (!selectedNode) return;
 
     updatePage((page) => ({
       ...page,
@@ -1358,36 +1328,6 @@ export default function EditorPage() {
           }
         })
       )
-    }));
-  }
-
-  function updatePageStyle(
-    key: string,
-    value: unknown
-  ) {
-    updatePage((page) => ({
-      ...page,
-      styles: {
-        ...(page.styles ?? {}),
-        [key]: value
-      }
-    }));
-  }
-
-  function updatePageMargin(
-    key:
-      | "top"
-      | "right"
-      | "bottom"
-      | "left",
-    value: number
-  ) {
-    updatePage((page) => ({
-      ...page,
-      margins: {
-        ...page.margins,
-        [key]: Math.max(0, value)
-      }
     }));
   }
 
@@ -1413,7 +1353,12 @@ export default function EditorPage() {
     setPageSelected(true);
   }
 
-  function deleteNode(id: string) {
+  function deleteSelected() {
+    if (!selectedIds.length) return;
+
+    const ids =
+      new Set(selectedIds);
+
     commit((current) => ({
       ...current,
       pages: current.pages.map(
@@ -1422,20 +1367,16 @@ export default function EditorPage() {
             ? {
                 ...page,
                 components:
-                  removeNode(
+                  removeNodes(
                     page.components,
-                    id
+                    ids
                   ).nodes
               }
             : page
       )
     }));
 
-    setSelectedIds((current) =>
-      current.filter(
-        (item) => item !== id
-      )
-    );
+    setSelectedIds([]);
   }
 
   function parseDrag(
@@ -1446,9 +1387,7 @@ export default function EditorPage() {
         "application/x-sytely"
       );
 
-    if (!raw) {
-      return null;
-    }
+    if (!raw) return null;
 
     try {
       return JSON.parse(
@@ -1459,13 +1398,15 @@ export default function EditorPage() {
     }
   }
 
-  function paletteDrag(
+  function setDrag(
     event: DragEvent,
     payload: DragPayload,
     label: string
   ) {
     event.dataTransfer.effectAllowed =
-      "copy";
+      payload.kind === "node"
+        ? "move"
+        : "copy";
 
     event.dataTransfer.setData(
       "application/x-sytely",
@@ -1475,230 +1416,266 @@ export default function EditorPage() {
     setDragLabel(label);
   }
 
-  function nodeDrag(
+  function nodeDragStart(
     event: DragEvent,
     id: string
   ) {
-    const ids = selectedIds.includes(
-      id
-    )
-      ? selectedIds
-      : [id];
+    const ids =
+      selectedIds.includes(id)
+        ? selectedIds
+        : [id];
 
-    event.dataTransfer.effectAllowed =
-      "move";
-
-    event.dataTransfer.setData(
-      "application/x-sytely",
-      JSON.stringify({
+    setDrag(
+      event,
+      {
         kind: "node",
         nodeIds: ids
-      } satisfies DragPayload)
-    );
-
-    setDragLabel(
+      },
       ids.length > 1
         ? `${ids.length} items`
         : "Move item"
     );
   }
 
-  function dropPosition(
+  function paletteDrag(
     event: DragEvent,
-    target: ComponentNode
-  ): DropPosition {
+    payload: DragPayload,
+    label: string
+  ) {
+    setDrag(
+      event,
+      payload,
+      label
+    );
+  }
+
+  function computeDropTarget(
+    event: DragEvent
+  ): DropTarget | null {
+    const point =
+      document
+        .elementsFromPoint(
+          event.clientX,
+          event.clientY
+        )
+        .find(
+          (element) =>
+            (
+              element as HTMLElement
+            ).dataset
+              .editorNodeId
+        ) as
+        | HTMLElement
+        | undefined;
+
+    if (!point) {
+      const root =
+        activePage.components;
+
+      return {
+        id: null,
+        parentId: null,
+        index: root.length,
+        position: "after",
+        sectionId: null
+      };
+    }
+
+    const id =
+      point.dataset.editorNodeId;
+
+    if (!id) return null;
+
+    const target = findNode(
+      activePage.components,
+      id
+    );
+
+    if (!target) return null;
+
     const rect =
-      event.currentTarget.getBoundingClientRect();
+      point.getBoundingClientRect();
 
     const y = rect.height
-      ? (event.clientY -
-          rect.top) /
+      ? (event.clientY - rect.top) /
         rect.height
       : 0.5;
 
+    const parentId =
+      findParentId(
+        activePage.components,
+        id
+      );
+
+    const siblings =
+      findSiblingList(
+        activePage.components,
+        parentId
+      );
+
+    const index = Math.max(
+      0,
+      siblings.findIndex(
+        (item) =>
+          item.id === id
+      )
+    );
+
     if (
       target.type === "section" &&
-      y > 0.16 &&
-      y < 0.84
+      y > 0.18 &&
+      y < 0.82
     ) {
-      return "inside";
+      return {
+        id,
+        parentId: id,
+        index:
+          target.children?.length ??
+          0,
+        position: "inside",
+        sectionId: id
+      };
     }
 
-    return y <= 0.5
-      ? "before"
-      : "after";
+    const before =
+      y < 0.5;
+
+    const sectionId =
+      target.type === "section"
+        ? target.id
+        : parentId &&
+            findNode(
+              activePage.components,
+              parentId
+            )?.type === "section"
+          ? parentId
+          : null;
+
+    return {
+      id,
+      parentId,
+      index: before
+        ? index
+        : index + 1,
+      position: before
+        ? "before"
+        : "after",
+      sectionId
+    };
   }
 
-  function nodeDragOver(
-    event: DragEvent,
-    target: ComponentNode
-  ) {
-    event.preventDefault();
-    event.dataTransfer.dropEffect =
-      "move";
-
-    setDropTarget({
-      id: target.id,
-      position: dropPosition(
-        event,
-        target
-      )
-    });
-
-    setDragPoint({
-      x: event.clientX,
-      y: event.clientY
-    });
-  }
-
-  function canvasDragOver(
+  function onCanvasDragOver(
     event: DragEvent
   ) {
     event.preventDefault();
 
-    setDragPoint({
-      x: event.clientX,
-      y: event.clientY
-    });
-  }
-
-  function insertNew(
-    page: SitePage,
-    newNode: ComponentNode
-  ): SitePage {
     const target =
-      dropTarget?.id
-        ? findNode(
-            page.components,
-            dropTarget.id
-          )
-        : null;
+      computeDropTarget(event);
 
-    if (
-      target?.type === "section" &&
-      dropTarget?.position ===
-        "inside"
-    ) {
-      return {
-        ...page,
-        components: insertNode(
-          page.components,
-          target.id,
-          [newNode],
-          "inside"
-        )
-      };
+    if (target) {
+      setDropTarget(target);
     }
 
-    if (!target) {
-      const first =
-        page.components.find(
-          (item) =>
-            item.type ===
-            "section"
-        );
-
-      if (first) {
-        return {
-          ...page,
-          components: insertNode(
-            page.components,
-            first.id,
-            [newNode],
-            "inside"
-          )
-        };
-      }
-
-      return {
-        ...page,
-        components: [
-          ...page.components,
-          section(newId(), [
-            newNode
-          ])
-        ]
-      };
-    }
-
-    return {
-      ...page,
-      components: insertNode(
-        page.components,
-        target.id,
-        [newNode],
-        dropTarget?.position ??
-          "after"
-      )
-    };
+    event.dataTransfer.dropEffect =
+      parseDrag(event)?.kind === "node"
+        ? "move"
+        : "copy";
   }
 
   function handleDrop(
-    event: DragEvent,
-    target?: ComponentNode
+    event: DragEvent
   ) {
     event.preventDefault();
+    event.stopPropagation();
 
-    const payload = parseDrag(event);
+    const payload =
+      parseDrag(event);
 
-    if (!payload) {
+    const target =
+      dropTarget ??
+      computeDropTarget(event);
+
+    if (!payload || !target) {
       return;
     }
 
     if (
-      payload.kind ===
-      "component"
+      payload.kind === "component"
     ) {
       const fresh =
         makeComponent(
           payload.componentType
         );
 
-      updatePage((page) =>
-        insertNew(page, fresh)
-      );
+      commit((current) => ({
+        ...current,
+        pages: current.pages.map(
+          (page) =>
+            page.id === activePageId
+              ? {
+                  ...page,
+                  components:
+                    insertAt(
+                      page.components,
+                      target.position ===
+                        "inside"
+                        ? target.id
+                        : target.parentId,
+                      target.index,
+                      [fresh]
+                    )
+                }
+              : page
+        )
+      }));
 
       setSelectedIds([
         fresh.id
       ]);
-    }
-
-    if (
-      payload.kind ===
-      "template"
+    } else if (
+      payload.kind === "template"
     ) {
-      const tpl =
+      const template =
         templates.find(
           (item) =>
             item.id ===
             payload.templateId
         );
 
-      if (!tpl) {
-        return;
+      if (template) {
+        const fresh =
+          cloneWithNewIds(
+            template.node
+          );
+
+        commit((current) => ({
+          ...current,
+          pages: current.pages.map(
+            (page) =>
+              page.id ===
+              activePageId
+                ? {
+                    ...page,
+                    components:
+                      insertAt(
+                        page.components,
+                        target.position ===
+                          "inside"
+                          ? target.id
+                          : target.parentId,
+                        target.index,
+                        [fresh]
+                      )
+                  }
+                : page
+          )
+        }));
+
+        setSelectedIds([
+          fresh.id
+        ]);
       }
-
-      const fresh =
-        cloneWithNewIds(
-          tpl.node
-        );
-
-      updatePage((page) => ({
-        ...page,
-        components: [
-          ...page.components,
-          fresh
-        ]
-      }));
-
-      setSelectedIds([
-        fresh.id
-      ]);
-    }
-
-    if (
-      payload.kind === "node"
-    ) {
+    } else {
       const moving =
         payload.nodeIds
           .map((id) =>
@@ -1714,65 +1691,87 @@ export default function EditorPage() {
               Boolean(item)
           );
 
-      if (!moving.length) {
+      if (
+        !moving.length ||
+        moving.some((item) =>
+          target.id
+            ? containsNode(
+                item,
+                target.id
+              )
+            : false
+        )
+      ) {
+        setDropTarget(null);
+        setDragLabel(null);
         return;
       }
 
-      if (
-        target &&
-        moving.some((item) =>
-          containsNode(
-            item,
-            target.id
-          )
-        )
-      ) {
-        return;
-      }
+      const movingSet =
+        new Set(
+          payload.nodeIds
+        );
 
       commit((current) => ({
         ...current,
-        pages:
-          current.pages.map(
-            (page) => {
-              if (
-                page.id !==
-                activePageId
-              ) {
-                return page;
-              }
-
-              const removed =
-                removeNodes(
-                  page.components,
-                  new Set(
-                    payload.nodeIds
-                  )
-                );
-
-              if (!target) {
-                return {
-                  ...page,
-                  components: [
-                    ...removed.nodes,
-                    ...removed.removed
-                  ]
-                };
-              }
-
-              return {
-                ...page,
-                components:
-                  insertNode(
-                    removed.nodes,
-                    target.id,
-                    removed.removed,
-                    dropTarget?.position ??
-                      "after"
-                  )
-              };
+        pages: current.pages.map(
+          (page) => {
+            if (
+              page.id !==
+              activePageId
+            ) {
+              return page;
             }
-          )
+
+            const destinationParent =
+              target.position ===
+              "inside"
+                ? target.id
+                : target.parentId;
+
+            const siblings =
+              findSiblingList(
+                page.components,
+                destinationParent
+              );
+
+            const removed =
+              removeNodes(
+                page.components,
+                movingSet
+              );
+
+            const movingBeforeTarget =
+              siblings
+                .slice(
+                  0,
+                  target.index
+                )
+                .filter((item) =>
+                  movingSet.has(
+                    item.id
+                  )
+                ).length;
+
+            const adjustedIndex =
+              Math.max(
+                0,
+                target.index -
+                  movingBeforeTarget
+              );
+
+            return {
+              ...page,
+              components:
+                insertAt(
+                  removed.nodes,
+                  destinationParent,
+                  adjustedIndex,
+                  removed.removed
+                )
+            };
+          }
+        )
       }));
     }
 
@@ -1780,22 +1779,576 @@ export default function EditorPage() {
     setDragLabel(null);
   }
 
+  function moveSelected(
+    direction: -1 | 1
+  ) {
+    if (!selectedIds.length) {
+      return;
+    }
+
+    const selectedSet =
+      new Set(selectedIds);
+
+    function reorder(
+      nodes: ComponentNode[]
+    ): ComponentNode[] {
+      const result =
+        nodes.map((item) => ({
+          ...item,
+          children:
+            item.children
+              ? reorder(
+                  item.children
+                )
+              : undefined
+        }));
+
+      const selectedIndexes =
+        result
+          .map((item, index) =>
+            selectedSet.has(
+              item.id
+            )
+              ? index
+              : -1
+          )
+          .filter(
+            (index) =>
+              index >= 0
+          );
+
+      if (
+        !selectedIndexes.length
+      ) {
+        return result;
+      }
+
+      if (direction < 0) {
+        for (
+          const index of
+            selectedIndexes
+        ) {
+          if (
+            index <= 0 ||
+            selectedSet.has(
+              result[index - 1].id
+            )
+          ) {
+            continue;
+          }
+
+          [
+            result[index - 1],
+            result[index]
+          ] = [
+            result[index],
+            result[index - 1]
+          ];
+        }
+      } else {
+        for (
+          let i =
+            selectedIndexes.length -
+            1;
+          i >= 0;
+          i -= 1
+        ) {
+          const index =
+            selectedIndexes[i];
+
+          if (
+            index >=
+              result.length - 1 ||
+            selectedSet.has(
+              result[index + 1].id
+            )
+          ) {
+            continue;
+          }
+
+          [
+            result[index],
+            result[index + 1]
+          ] = [
+            result[index + 1],
+            result[index]
+          ];
+        }
+      }
+
+      return result;
+    }
+
+    commit((current) => ({
+      ...current,
+      pages: current.pages.map(
+        (page) =>
+          page.id === activePageId
+            ? {
+                ...page,
+                components:
+                  reorder(
+                    page.components
+                  )
+              }
+            : page
+      )
+    }));
+  }
+
+  function duplicateSelected() {
+    if (!selectedIds.length) {
+      return;
+    }
+
+    const clones: ComponentNode[] =
+      [];
+
+    commit((current) => ({
+      ...current,
+      pages: current.pages.map(
+        (page) => {
+          if (
+            page.id !==
+            activePageId
+          ) {
+            return page;
+          }
+
+          const selectedSet =
+            new Set(
+              selectedIds
+            );
+
+          const parentId =
+            findParentId(
+              page.components,
+              selectedIds[0]
+            );
+
+          const sameParent =
+            selectedIds.every(
+              (id) =>
+                findParentId(
+                  page.components,
+                  id
+                ) === parentId
+            );
+
+          if (!sameParent) {
+            return page;
+          }
+
+          const siblings =
+            findSiblingList(
+              page.components,
+              parentId
+            );
+
+          const selectedInOrder =
+            siblings.filter(
+              (item) =>
+                selectedSet.has(
+                  item.id
+                )
+            );
+
+          clones.push(
+            ...selectedInOrder.map(
+              cloneWithNewIds
+            )
+          );
+
+          if (
+            !selectedInOrder.length
+          ) {
+            return page;
+          }
+
+          const last =
+            Math.max(
+              ...selectedInOrder.map(
+                (item) =>
+                  siblings.findIndex(
+                    (sibling) =>
+                      sibling.id ===
+                      item.id
+                  )
+              )
+            );
+
+          return {
+            ...page,
+            components:
+              insertAt(
+                page.components,
+                parentId,
+                last + 1,
+                clones
+              )
+          };
+        }
+      )
+    }));
+
+    setSelectedIds(
+      clones.map(
+        (item) => item.id
+      )
+    );
+  }
+
+  function groupSelected() {
+    if (
+      selectedIds.length < 2
+    ) {
+      return;
+    }
+
+    const parentId =
+      findParentId(
+        activePage.components,
+        selectedIds[0]
+      );
+
+    if (
+      !selectedIds.every(
+        (id) =>
+          findParentId(
+            activePage.components,
+            id
+          ) === parentId
+      )
+    ) {
+      setNotice(
+        "Group items from the same level"
+      );
+      return;
+    }
+
+    const selectedSet =
+      new Set(selectedIds);
+
+    const siblings =
+      findSiblingList(
+        activePage.components,
+        parentId
+      );
+
+    const chosen =
+      siblings.filter(
+        (item) =>
+          selectedSet.has(
+            item.id
+          )
+      );
+
+    if (!chosen.length) {
+      return;
+    }
+
+    const group = section(
+      newId(),
+      chosen,
+      {
+        paddingTop: 24,
+        paddingRight: 24,
+        paddingBottom: 24,
+        paddingLeft: 24,
+        gap: 16,
+        background:
+          "var(--sytely-card)"
+      }
+    );
+
+    const start =
+      siblings.findIndex(
+        (item) =>
+          item.id ===
+          chosen[0].id
+      );
+
+    commit((current) => ({
+      ...current,
+      pages: current.pages.map(
+        (page) =>
+          page.id === activePageId
+            ? {
+                ...page,
+                components:
+                  insertAt(
+                    removeNodes(
+                      page.components,
+                      selectedSet
+                    ).nodes,
+                    parentId,
+                    start,
+                    [group]
+                  )
+              }
+            : page
+      )
+    }));
+
+    setSelectedIds([
+      group.id
+    ]);
+  }
+
+  function ungroupSelected() {
+    if (
+      !selectedNode ||
+      selectedNode.type !==
+        "section"
+    ) {
+      return;
+    }
+
+    const parentId =
+      findParentId(
+        activePage.components,
+        selectedNode.id
+      );
+
+    const siblings =
+      findSiblingList(
+        activePage.components,
+        parentId
+      );
+
+    const index =
+      siblings.findIndex(
+        (item) =>
+          item.id ===
+          selectedNode.id
+      );
+
+    const children =
+      selectedNode.children ?? [];
+
+    commit((current) => ({
+      ...current,
+      pages: current.pages.map(
+        (page) =>
+          page.id === activePageId
+            ? {
+                ...page,
+                components:
+                  insertAt(
+                    removeSingle(
+                      page.components,
+                      selectedNode.id
+                    ),
+                    parentId,
+                    index,
+                    children
+                  )
+              }
+            : page
+      )
+    }));
+
+    setSelectedIds(
+      children.map(
+        (item) => item.id
+      )
+    );
+  }
+
+  function startResize(
+    event: ReactPointerEvent<HTMLDivElement>,
+    id: string
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const ids =
+      selectedIds.includes(id)
+        ? selectedIds
+        : [id];
+
+    const widths: Record<
+      string,
+      number
+    > = {};
+
+    const heights: Record<
+      string,
+      number
+    > = {};
+
+    ids.forEach((itemId) => {
+      const element =
+        document.querySelector<HTMLElement>(
+          `[data-sytely-id="${itemId}"]`
+        );
+
+      if (!element) {
+        return;
+      }
+
+      const rect =
+        element.getBoundingClientRect();
+
+      widths[itemId] =
+        rect.width /
+        (zoom / 100);
+
+      heights[itemId] =
+        rect.height /
+        (zoom / 100);
+    });
+
+    setResizeState({
+      ids,
+      startX: event.clientX,
+      startY: event.clientY,
+      widths,
+      heights,
+      before: site
+    });
+  }
+
+  useEffect(() => {
+    if (!resizeState) {
+      return;
+    }
+
+    const move = (
+      event: PointerEvent
+    ) => {
+      const dx =
+        (event.clientX -
+          resizeState.startX) /
+        (zoom / 100);
+
+      const dy =
+        (event.clientY -
+          resizeState.startY) /
+        (zoom / 100);
+
+      const selectedSet =
+        new Set(
+          resizeState.ids
+        );
+
+      setSite((current) => ({
+        ...current,
+        pages: current.pages.map(
+          (page) =>
+            page.id === activePageId
+              ? {
+                  ...page,
+                  components:
+                    updateMany(
+                      page.components,
+                      selectedSet,
+                      (item) => ({
+                        ...item,
+                        styles: {
+                          ...(item.styles ??
+                            {}),
+                          width: Math.max(
+                            80,
+                            (resizeState
+                              .widths[
+                              item.id
+                            ] ??
+                              160) + dx
+                          ),
+                          height: Math.max(
+                            40,
+                            (resizeState
+                              .heights[
+                              item.id
+                            ] ??
+                              80) + dy
+                          )
+                        }
+                      })
+                    )
+                }
+              : page
+        )
+      }));
+
+      setDirty(true);
+      setNotice("Unsaved changes");
+    };
+
+    const up = () => {
+      setHistory((items) => [
+        ...items.slice(-49),
+        resizeState.before
+      ]);
+
+      setFuture([]);
+      setResizeState(null);
+    };
+
+    window.addEventListener(
+      "pointermove",
+      move
+    );
+
+    window.addEventListener(
+      "pointerup",
+      up,
+      {
+        once: true
+      }
+    );
+
+    return () => {
+      window.removeEventListener(
+        "pointermove",
+        move
+      );
+
+      window.removeEventListener(
+        "pointerup",
+        up
+      );
+    };
+  }, [
+    resizeState,
+    zoom,
+    activePageId
+  ]);
+
   function startMarquee(
     event: ReactPointerEvent<HTMLDivElement>
   ) {
+    const target =
+      event.target as HTMLElement;
+
     if (
       event.button !== 0 ||
-      (
-        event.target as HTMLElement
-      ).closest(
-        ".editor-node,.floating-toolbar,.canvas-controls,.inspector-panel,.side-rail,.topbar"
+      target.closest(
+        [
+          ".sytely-editor-target",
+          ".floating-toolbar",
+          ".canvas-toolbar",
+          ".inspector-panel",
+          ".side-rail",
+          ".topbar",
+          ".drop-overlay"
+        ].join(",")
       )
     ) {
       return;
     }
 
+    const additive =
+      event.shiftKey ||
+      event.metaKey ||
+      event.ctrlKey;
+
+    if (!additive) {
+      setSelectedIds([]);
+    }
+
     setPageSelected(false);
-    setSelectedIds([]);
 
     setMarquee({
       startX: event.clientX,
@@ -1827,219 +2380,87 @@ export default function EditorPage() {
       );
     };
 
-    const up = () => {
-      setMarquee(
-        (current) => {
-          if (!current) {
-            return null;
-          }
-
-          const left = Math.min(
-            current.startX,
-            current.currentX
-          );
-          const right = Math.max(
-            current.startX,
-            current.currentX
-          );
-          const top = Math.min(
-            current.startY,
-            current.currentY
-          );
-          const bottom = Math.max(
-            current.startY,
-            current.currentY
-          );
-
-          const selected =
-            allNodes
-              .filter((item) => {
-                const el =
-                  document.querySelector<HTMLElement>(
-                    `[data-sytely-id="${item.id}"]`
-                  );
-
-                if (!el) {
-                  return false;
-                }
-
-                const rect =
-                  el.getBoundingClientRect();
-
-                return (
-                  rect.left < right &&
-                  rect.right > left &&
-                  rect.top < bottom &&
-                  rect.bottom > top
-                );
-              })
-              .map(
-                (item) =>
-                  item.id
-              );
-
-          if (
-            right - left > 5 ||
-            bottom - top > 5
-          ) {
-            setSelectedIds(
-              selected
-            );
-            setPageSelected(
-              false
-            );
-          }
-
-          return null;
-        }
-      );
-    };
-
-    window.addEventListener(
-      "pointermove",
-      move
-    );
-
-    window.addEventListener(
-      "pointerup",
-      up,
-      { once: true }
-    );
-
-    return () =>
-      window.removeEventListener(
-        "pointermove",
-        move
-      );
-  }, [marquee, allNodes]);
-
-  function startResize(
-    event: ReactPointerEvent<HTMLDivElement>,
-    id: string
-  ) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    const ids =
-      selectedIds.includes(id)
-        ? selectedIds
-        : [id];
-
-    const widths: Record<
-      string,
-      number
-    > = {};
-
-    const heights: Record<
-      string,
-      number
-    > = {};
-
-    for (const itemId of ids) {
-      const el =
-        document.querySelector<HTMLElement>(
-          `[data-sytely-id="${itemId}"]`
-        );
-
-      if (!el) {
-        continue;
-      }
-
-      const rect =
-        el.getBoundingClientRect();
-
-      widths[itemId] =
-        rect.width /
-        (zoom / 100);
-
-      heights[itemId] =
-        rect.height /
-        (zoom / 100);
-    }
-
-    setResizeState({
-      ids,
-      startX: event.clientX,
-      startY: event.clientY,
-      widths,
-      heights,
-      before: site
-    });
-  }
-
-  useEffect(() => {
-    if (!resizeState) {
-      return;
-    }
-
-    const move = (
+    const up = (
       event: PointerEvent
     ) => {
-      const scale =
-        zoom / 100;
+      setMarquee((current) => {
+        if (!current) {
+          return null;
+        }
 
-      const dx =
-        (event.clientX -
-          resizeState.startX) /
-        scale;
+        const left =
+          Math.min(
+            current.startX,
+            current.currentX
+          );
 
-      const dy =
-        (event.clientY -
-          resizeState.startY) /
-        scale;
+        const right =
+          Math.max(
+            current.startX,
+            current.currentX
+          );
 
-      updatePageImmediate(
-        (page) => ({
-          ...page,
-          components:
-            updateMany(
-              page.components,
-              new Set(
-                resizeState.ids
-              ),
-              (item) => ({
-                ...item,
-                styles: {
-                  ...(item.styles ??
-                    {}),
-                  width: Math.max(
-                    80,
-                    (
-                      resizeState
-                        .widths[
-                        item.id
-                      ] ??
-                      160
-                    ) + dx
-                  ),
-                  height:
-                    Math.max(
-                      40,
-                      (
-                        resizeState
-                          .heights[
-                          item.id
-                        ] ??
-                        80
-                      ) + dy
-                    )
-                }
-              })
-            )
-        })
-      );
-    };
+        const top =
+          Math.min(
+            current.startY,
+            current.currentY
+          );
 
-    const up = () => {
-      setHistory((items) => [
-        ...items.slice(-39),
-        resizeState.before
-      ]);
-      setFuture([]);
-      setResizeState(null);
-      setNotice(
-        "Unsaved changes"
-      );
+        const bottom =
+          Math.max(
+            current.startY,
+            current.currentY
+          );
+
+        if (
+          right - left < 6 &&
+          bottom - top < 6
+        ) {
+          return null;
+        }
+
+        const hit =
+          allNodes
+            .filter((item) => {
+              const element =
+                document.querySelector<HTMLElement>(
+                  `[data-sytely-id="${item.id}"]`
+                );
+
+              if (!element) {
+                return false;
+              }
+
+              const rect =
+                element.getBoundingClientRect();
+
+              return (
+                rect.left < right &&
+                rect.right > left &&
+                rect.top < bottom &&
+                rect.bottom > top
+              );
+            })
+            .map(
+              (item) => item.id
+            );
+
+        setSelectedIds(
+          (ids) =>
+            event.shiftKey ||
+            event.metaKey ||
+            event.ctrlKey
+              ? Array.from(
+                  new Set([
+                    ...ids,
+                    ...hit
+                  ])
+                )
+              : hit
+        );
+
+        return null;
+      });
     };
 
     window.addEventListener(
@@ -2050,217 +2471,30 @@ export default function EditorPage() {
     window.addEventListener(
       "pointerup",
       up,
-      { once: true }
+      {
+        once: true
+      }
     );
 
-    return () =>
+    return () => {
       window.removeEventListener(
         "pointermove",
         move
       );
-  }, [resizeState, zoom]);
 
-  function duplicateSelected() {
-    if (!selectedIds.length) {
-      return;
-    }
-
-    const selectedSet =
-      new Set(selectedIds);
-
-    const clones: ComponentNode[] =
-      [];
-
-    commit((current) => ({
-      ...current,
-      pages: current.pages.map(
-        (page) => {
-          if (
-            page.id !==
-            activePageId
-          ) {
-            return page;
-          }
-
-          const top =
-            page.components.filter(
-              (item) =>
-                selectedSet.has(
-                  item.id
-                )
-            );
-
-          clones.push(
-            ...top.map(
-              cloneWithNewIds
-            )
-          );
-
-          return {
-            ...page,
-            components: [
-              ...page.components,
-              ...clones
-            ]
-          };
-        }
-      )
-    }));
-
-    if (clones.length) {
-      setSelectedIds(
-        clones.map(
-          (item) => item.id
-        )
+      window.removeEventListener(
+        "pointerup",
+        up
       );
-    }
-  }
-
-  function groupSelected() {
-    if (
-      selectedIds.length < 2
-    ) {
-      return;
-    }
-
-    const parentIds =
-      selectedIds.map((id) =>
-        findParentId(
-          activePage.components,
-          id
-        )
-      );
-
-    if (
-      new Set(parentIds)
-        .size !== 1
-    ) {
-      setNotice(
-        "Select items from the same level to group"
-      );
-      return;
-    }
-
-    const parentId =
-      parentIds[0];
-
-    const selectedSet =
-      new Set(selectedIds);
-
-    const group = section(
-      newId(),
-      selectedNodes,
-      {
-        paddingTop: 28,
-        paddingRight: 28,
-        paddingBottom: 28,
-        paddingLeft: 28,
-        gap: 18,
-        background:
-          "var(--sytely-card)"
-      }
-    );
-
-    commit((current) => ({
-      ...current,
-      pages: current.pages.map(
-        (page) => {
-          if (
-            page.id !==
-            activePageId
-          ) {
-            return page;
-          }
-
-          if (
-            parentId === null
-          ) {
-            return {
-              ...page,
-              components: [
-                ...page.components.filter(
-                  (item) =>
-                    !selectedSet.has(
-                      item.id
-                    )
-                ),
-                group
-              ]
-            };
-          }
-
-          return {
-            ...page,
-            components:
-              updateNode(
-                page.components,
-                parentId,
-                (item) => ({
-                  ...item,
-                  children: [
-                    ...(item.children ??
-                      []).filter(
-                      (child) =>
-                        !selectedSet.has(
-                          child.id
-                        )
-                    ),
-                    group
-                  ]
-                })
-              )
-          };
-        }
-      )
-    }));
-
-    setSelectedIds([
-      group.id
-    ]);
-  }
-
-  function ungroupSelected() {
-    if (
-      !selectedNode?.children
-        ?.length ||
-      selectedNode.type !==
-        "section"
-    ) {
-      return;
-    }
-
-    const children =
-      selectedNode.children;
-
-    commit((current) => ({
-      ...current,
-      pages: current.pages.map(
-        (page) =>
-          page.id === activePageId
-            ? {
-                ...page,
-                components:
-                  replaceNodeWithChildren(
-                    page.components,
-                    selectedNode.id
-                  )
-              }
-            : page
-      )
-    }));
-
-    setSelectedIds(
-      children.map(
-        (item) => item.id
-      )
-    );
-  }
+    };
+  }, [
+    marquee,
+    allNodes
+  ]);
 
   function undo() {
     const previous =
-      history[
-        history.length - 1
-      ];
+      history.at(-1);
 
     if (!previous) {
       return;
@@ -2276,20 +2510,13 @@ export default function EditorPage() {
     );
 
     setSite(previous);
-
-    setActivePageId(
-      previous.pages.find(
-        (page) =>
-          page.id ===
-          activePageId
-      )?.id ??
-        previous.pages[0]?.id ??
-        "page-home"
-    );
+    setDirty(true);
+    setNotice("Unsaved changes");
   }
 
   function redo() {
-    const next = future[0];
+    const next =
+      future[0];
 
     if (!next) {
       return;
@@ -2305,16 +2532,34 @@ export default function EditorPage() {
     );
 
     setSite(next);
+    setDirty(true);
+    setNotice("Unsaved changes");
   }
 
-  function createPage() {
+  function createPage(
+    template?: Template
+  ) {
     const id = newId();
 
-    const page = defaultPage(
-      id,
-      `Page ${site.pages.length + 1}`,
-      `/page-${site.pages.length + 1}`
-    );
+    const page =
+      defaultPage(
+        id,
+        template
+          ? template.name
+          : `Page ${site.pages.length + 1}`,
+        template
+          ? `/${template.id}-${site.pages.length + 1}`
+          : `/page-${site.pages.length + 1}`
+      );
+
+    page.components =
+      template
+        ? [
+            cloneWithNewIds(
+              template.node
+            )
+          ]
+        : [];
 
     commit((current) => ({
       ...current,
@@ -2329,47 +2574,26 @@ export default function EditorPage() {
     setPageSelected(true);
   }
 
-  function deletePage() {
-    if (site.pages.length <= 1) {
-      return;
-    }
-
-    const next =
-      site.pages.filter(
-        (page) =>
-          page.id !==
-          activePageId
-      );
-
-    commit((current) => ({
-      ...current,
-      pages: next
-    }));
-
-    setActivePageId(
-      next[0].id
-    );
-    setSelectedIds([]);
-    setPageSelected(true);
-  }
-
   function duplicatePage() {
-    const source = activePage;
-
-    const id = newId();
-
     const copy: SitePage = {
-      ...source,
-      id,
-      name: `${source.name} Copy`,
+      ...activePage,
+      id: newId(),
+      name: `${activePage.name} Copy`,
       slug: `${
-        source.slug.replace(
+        activePage.slug.replace(
           /\/$/,
           ""
         ) || "/page"
       }-copy`,
+      margins: {
+        ...activePage.margins
+      },
+      styles: {
+        ...(activePage.styles ??
+          {})
+      },
       components:
-        source.components.map(
+        activePage.components.map(
           cloneWithNewIds
         )
     };
@@ -2382,42 +2606,75 @@ export default function EditorPage() {
       ]
     }));
 
-    setActivePageId(id);
-  }
-
-  function switchSite(id: string) {
-    const next =
-      sites.find(
-        (item) => item.id === id
-      );
-
-    if (!next) {
-      return;
-    }
-
-    setSite(next);
     setActivePageId(
-      next.pages[0]?.id ??
-        "page-home"
+      copy.id
     );
+
     setSelectedIds([]);
     setPageSelected(true);
   }
 
-  function createSite() {
-    const id = newId();
+  function deletePage() {
+    if (
+      site.pages.length <= 1
+    ) {
+      return;
+    }
 
+    const remaining =
+      site.pages.filter(
+        (page) =>
+          page.id !==
+          activePageId
+      );
+
+    commit((current) => ({
+      ...current,
+      pages: remaining
+    }));
+
+    setActivePageId(
+      remaining[0].id
+    );
+
+    setSelectedIds([]);
+    setPageSelected(true);
+  }
+
+  function renamePage() {
+    const name =
+      window.prompt(
+        "Page name",
+        activePage.name
+      );
+
+    if (!name?.trim()) {
+      return;
+    }
+
+    updatePage((page) => ({
+      ...page,
+      name: name.trim()
+    }));
+  }
+
+  function createSite() {
     const fresh: Site = {
       ...initialSite,
-      id,
-      name: `Website ${
-        sites.length + 1
-      }`,
+      id: newId(),
+      name: `Website ${sites.length + 1}`,
       pages:
         initialSite.pages.map(
           (page) => ({
             ...page,
             id: newId(),
+            margins: {
+              ...page.margins
+            },
+            styles: {
+              ...(page.styles ??
+                {})
+            },
             components:
               page.components.map(
                 cloneWithNewIds
@@ -2426,8 +2683,8 @@ export default function EditorPage() {
         )
     };
 
-    setSites((current) => [
-      ...current,
+    setSites((items) => [
+      ...items,
       fresh
     ]);
 
@@ -2439,45 +2696,10 @@ export default function EditorPage() {
 
     setSelectedIds([]);
     setPageSelected(true);
+    setDirty(true);
     setNotice(
-      "New website created"
+      "Unsaved changes"
     );
-  }
-
-  function duplicateSite() {
-    const id = newId();
-
-    const copy: Site = {
-      ...site,
-      id,
-      name: `${site.name} Copy`,
-      pages:
-        site.pages.map(
-          (page) => ({
-            ...page,
-            id: newId(),
-            components:
-              page.components.map(
-                cloneWithNewIds
-              )
-          })
-        )
-    };
-
-    setSites((current) => [
-      ...current,
-      copy
-    ]);
-
-    setSite(copy);
-
-    setActivePageId(
-      copy.pages[0]?.id ??
-        "page-home"
-    );
-
-    setSelectedIds([]);
-    setPageSelected(true);
   }
 
   function renameSite() {
@@ -2497,8 +2719,79 @@ export default function EditorPage() {
     }));
   }
 
+  function setResponsiveStyle(
+    key: string,
+    value: unknown
+  ) {
+    if (!selectedIds.length) {
+      return;
+    }
+
+    const selectedSet =
+      new Set(selectedIds);
+
+    commit((current) => ({
+      ...current,
+      pages: current.pages.map(
+        (page) =>
+          page.id === activePageId
+            ? {
+                ...page,
+                components:
+                  updateMany(
+                    page.components,
+                    selectedSet,
+                    (item) => ({
+                      ...item,
+                      styles: {
+                        ...(item.styles ??
+                          {}),
+                        responsive: {
+                          ...(
+                            (item.styles
+                              ?.responsive as
+                              | Record<
+                                  string,
+                                  unknown
+                                >
+                              | undefined) ??
+                            {}
+                          ),
+                          [device]: {
+                            ...(
+                              (
+                                (
+                                  item.styles
+                                    ?.responsive as
+                                    | Record<
+                                        string,
+                                        unknown
+                                      >
+                                    | undefined
+                                )?.[
+                                  device
+                                ] as
+                                  | Record<
+                                      string,
+                                      unknown
+                                    >
+                                  | undefined
+                              ) ?? {}
+                            ),
+                            [key]: value
+                          }
+                        }
+                      }
+                    })
+                  )
+              }
+            : page
+      )
+    }));
+  }
+
   useEffect(() => {
-    const onKey = (
+    const keyHandler = (
       event: KeyboardEvent
     ) => {
       const target =
@@ -2519,6 +2812,16 @@ export default function EditorPage() {
       const meta =
         event.metaKey ||
         event.ctrlKey;
+
+      if (
+        meta &&
+        event.key.toLowerCase() ===
+          "s"
+      ) {
+        event.preventDefault();
+        persist(site);
+        return;
+      }
 
       if (
         meta &&
@@ -2557,200 +2860,430 @@ export default function EditorPage() {
       }
 
       if (
-        event.key === "Delete" ||
-        event.key === "Backspace"
+        event.key ===
+        "Escape"
       ) {
-        if (selectedIds.length) {
-          event.preventDefault();
-          selectedIds.forEach(
-            deleteNode
-          );
-        }
-      }
-
-      if (event.key === "Escape") {
         setSelectedIds([]);
         setPageSelected(true);
         setDropTarget(null);
+        setMarquee(null);
+        return;
+      }
+
+      if (
+        (
+          event.key ===
+            "Delete" ||
+          event.key ===
+            "Backspace"
+        ) &&
+        selectedIds.length
+      ) {
+        event.preventDefault();
+        deleteSelected();
+        return;
       }
 
       if (
         selectedIds.length &&
         [
-          "ArrowLeft",
-          "ArrowRight",
           "ArrowUp",
-          "ArrowDown"
+          "ArrowDown",
+          "ArrowLeft",
+          "ArrowRight"
         ].includes(event.key)
       ) {
         event.preventDefault();
 
-        const key =
+        if (
+          event.key ===
+          "ArrowUp"
+        ) {
+          moveSelected(-1);
+        }
+
+        if (
+          event.key ===
+          "ArrowDown"
+        ) {
+          moveSelected(1);
+        }
+
+        if (
           event.key ===
             "ArrowLeft" ||
           event.key ===
             "ArrowRight"
-            ? "marginLeft"
-            : "marginTop";
+        ) {
+          const key =
+            "marginLeft";
 
-        const delta =
-          event.shiftKey ? 10 : 1;
+          const delta =
+            event.shiftKey
+              ? 10
+              : 1;
 
-        const direction =
-          event.key ===
-            "ArrowLeft" ||
-          event.key ===
-            "ArrowUp"
-            ? -1
-            : 1;
+          const direction =
+            event.key ===
+            "ArrowLeft"
+              ? -1
+              : 1;
 
-        commit((current) => ({
-          ...current,
-          pages:
-            current.pages.map(
-              (page) =>
-                page.id ===
-                activePageId
-                  ? {
-                      ...page,
-                      components:
-                        updateMany(
-                          page.components,
-                          new Set(
-                            selectedIds
-                          ),
-                          (item) => ({
-                            ...item,
-                            styles: {
-                              ...(item.styles ??
-                                {}),
-                              [key]:
-                                parseNumber(
-                                  styleValue(
-                                    item,
-                                    key
-                                  ),
-                                  0
-                                ) +
-                                direction *
-                                  delta
-                            }
-                          })
-                        )
-                    }
-                  : page
-            )
-        }));
+          const selectedSet =
+            new Set(
+              selectedIds
+            );
+
+          commit((current) => ({
+            ...current,
+            pages:
+              current.pages.map(
+                (page) =>
+                  page.id ===
+                  activePageId
+                    ? {
+                        ...page,
+                        components:
+                          updateMany(
+                            page.components,
+                            selectedSet,
+                            (item) => ({
+                              ...item,
+                              styles: {
+                                ...(item.styles ??
+                                  {}),
+                                [key]:
+                                  parseNumber(
+                                    item
+                                      .styles?.[
+                                      key
+                                    ]
+                                  ) +
+                                  delta *
+                                    direction
+                              }
+                            })
+                          )
+                      }
+                    : page
+              )
+          }));
+        }
       }
     };
 
     window.addEventListener(
       "keydown",
-      onKey
+      keyHandler
     );
 
     return () =>
       window.removeEventListener(
         "keydown",
-        onKey
+        keyHandler
       );
-  });
+  }, [
+    activePageId,
+    deleteSelected,
+    duplicateSelected,
+    moveSelected,
+    persist,
+    redo,
+    selectedIds,
+    site,
+    undo
+  ]);
 
-  const activePageBackground =
-    String(
-      activePage?.styles
-        ?.background ??
-        "var(--sytely-page)"
+  const filteredComponents =
+    (
+      Object.keys(
+        componentInfo
+      ) as ComponentType[]
+    ).filter((type) =>
+      componentInfo[
+        type
+      ].label
+        .toLowerCase()
+        .includes(
+          search.toLowerCase()
+        )
     );
 
-  const canvasWidth =
-    device === "mobile"
-      ? 390
-      : device === "tablet"
-        ? 768
-        : 1180;
-
-  const nodeTypeLabel =
-    selectedNode?.type ??
-    "page";
-
-  function alignmentButton(
-    label: string,
-    value: string,
-    key: string
-  ) {
-    const current =
-      String(
-        styleValue(
-          selectedNode ?? {
-            id: "",
-            type: "text",
-            props: {},
-            styles: {}
-          },
-          key
-        ) ?? ""
-      );
-
-    return (
-      <button
-        type="button"
-        className={
-          current === value
-            ? "active"
-            : ""
-        }
-        onPointerDown={(event) =>
-          event.stopPropagation()
-        }
-        onClick={() =>
-          setNodeStyle(
-            key,
-            value
+  const filteredTemplates =
+    templates.filter(
+      (template) =>
+        `${template.name} ${template.description}`
+          .toLowerCase()
+          .includes(
+            search.toLowerCase()
           )
+    );
+
+  function styleInput(
+    key: string,
+    responsive = false
+  ) {
+    const value =
+      responsive
+        ? (
+            (
+              selectedNode
+                ?.styles
+                ?.responsive as
+                | Record<
+                    string,
+                    unknown
+                  >
+                | undefined
+            )?.[device] as
+              | Record<
+                  string,
+                  unknown
+                >
+              | undefined
+          )?.[key]
+        : selectedNode?.styles?.[
+            key
+          ];
+
+    return value;
+  }
+
+  function renderSelectionOverlay() {
+    if (
+      !selectedIds.length ||
+      preview
+    ) {
+      return null;
+    }
+
+    return selectedIds.map(
+      (id) => {
+        const element =
+          document.querySelector<HTMLElement>(
+            `[data-sytely-id="${id}"]`
+          );
+
+        if (!element) {
+          return null;
         }
-      >
-        {label}
-      </button>
+
+        const rect =
+          element.getBoundingClientRect();
+
+        const type =
+          findNode(
+            activePage.components,
+            id
+          )?.type ??
+          "section";
+
+        return (
+          <div
+            key={id}
+            className="selection-overlay"
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              height: rect.height
+            }}
+          >
+            <span>
+              {
+                componentInfo[
+                  type
+                ].label
+              }
+            </span>
+
+            {selectedIds.length ===
+              1 && (
+              <button
+                type="button"
+                className="overlay-delete"
+                onPointerDown={(
+                  event
+                ) =>
+                  event.stopPropagation()
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setSelectedIds([
+                    id
+                  ]);
+                  deleteSelected();
+                }}
+              >
+                ×
+              </button>
+            )}
+
+            {selectedIds.length ===
+              1 && (
+              <>
+                <div
+                  className="overlay-resize overlay-resize-right"
+                  onPointerDown={(
+                    event
+                  ) =>
+                    startResize(
+                      event,
+                      id
+                    )
+                  }
+                />
+
+                <div
+                  className="overlay-resize overlay-resize-bottom"
+                  onPointerDown={(
+                    event
+                  ) =>
+                    startResize(
+                      event,
+                      id
+                    )
+                  }
+                />
+
+                <div
+                  className="overlay-resize overlay-resize-corner"
+                  onPointerDown={(
+                    event
+                  ) =>
+                    startResize(
+                      event,
+                      id
+                    )
+                  }
+                />
+              </>
+            )}
+          </div>
+        );
+      }
     );
   }
+
+  const dropStyle =
+    useMemo(() => {
+      if (
+        !dropTarget ||
+        !dragLabel
+      ) {
+        return null;
+      }
+
+      if (!dropTarget.id) {
+        return {
+          left: 20,
+          right: 20,
+          top: 20,
+          height: 3
+        };
+      }
+
+      const element =
+        document.querySelector<HTMLElement>(
+          `[data-sytely-id="${dropTarget.id}"]`
+        );
+
+      if (!element) {
+        return null;
+      }
+
+      const rect =
+        element.getBoundingClientRect();
+
+      if (
+        dropTarget.position ===
+        "inside"
+      ) {
+        return {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height
+        };
+      }
+
+      return {
+        left: rect.left,
+        top:
+          dropTarget.position ===
+          "before"
+            ? rect.top - 2
+            : rect.bottom - 1,
+        width: rect.width,
+        height: 3
+      };
+    }, [
+      dropTarget,
+      dragLabel,
+      allNodes
+    ]);
 
   return (
     <div
       className="editor-shell"
-      data-theme="system"
       style={themeVars(theme)}
+      data-theme={theme}
     >
       <header className="topbar">
         <div className="brand-block">
           <a
             href="/"
             className="brand"
+            onClick={(event) =>
+              event.preventDefault()
+            }
           >
             Sytely
           </a>
-          <span className="crumb">
-            / Editor
-          </span>
+
+          <span>/ Editor</span>
         </div>
 
         <div className="site-switcher">
           <select
             value={site.id}
-            onChange={(event) =>
-              switchSite(
-                event.target.value
-              )
-            }
+            onChange={(event) => {
+              const next =
+                sites.find(
+                  (item) =>
+                    item.id ===
+                    event.target.value
+                );
+
+              if (!next) {
+                return;
+              }
+
+              setSite(next);
+
+              setActivePageId(
+                next.pages[0]?.id ??
+                  "page-home"
+              );
+
+              setSelectedIds([]);
+              setPageSelected(true);
+              setDirty(false);
+              setNotice("Saved");
+              setHistory([]);
+              setFuture([]);
+            }}
           >
-            {sites.map((item) => (
-              <option
-                key={item.id}
-                value={item.id}
-              >
-                {item.name}
-              </option>
-            ))}
+            {sites.map(
+              (item) => (
+                <option
+                  key={item.id}
+                  value={item.id}
+                >
+                  {item.name}
+                </option>
+              )
+            )}
           </select>
 
           <button
@@ -2758,13 +3291,6 @@ export default function EditorPage() {
             onClick={createSite}
           >
             New
-          </button>
-
-          <button
-            type="button"
-            onClick={duplicateSite}
-          >
-            Duplicate
           </button>
 
           <button
@@ -2779,8 +3305,10 @@ export default function EditorPage() {
           <button
             type="button"
             onClick={undo}
-            disabled={!history.length}
-            title="Undo"
+            disabled={
+              !history.length
+            }
+            aria-label="Undo"
           >
             ↶
           </button>
@@ -2788,10 +3316,26 @@ export default function EditorPage() {
           <button
             type="button"
             onClick={redo}
-            disabled={!future.length}
-            title="Redo"
+            disabled={
+              !future.length
+            }
+            aria-label="Redo"
           >
             ↷
+          </button>
+
+          <button
+            type="button"
+            className={
+              dirty
+                ? "save-button dirty"
+                : "save-button"
+            }
+            onClick={() =>
+              persist(site)
+            }
+          >
+            Save
           </button>
 
           <span className="save-status">
@@ -2821,7 +3365,8 @@ export default function EditorPage() {
                 {item ===
                 "desktop"
                   ? "Desktop"
-                  : item === "tablet"
+                  : item ===
+                      "tablet"
                     ? "Tablet"
                     : "Mobile"}
               </button>
@@ -2830,10 +3375,10 @@ export default function EditorPage() {
 
           <button
             type="button"
+            className="primary-button"
             onClick={() =>
               setPreview(true)
             }
-            className="primary-button"
           >
             Preview
           </button>
@@ -2842,9 +3387,7 @@ export default function EditorPage() {
             type="button"
             className="publish-button"
             onClick={() =>
-              setNotice(
-                "Publish flow ready"
-              )
+              persist(site)
             }
           >
             Publish
@@ -2861,20 +3404,24 @@ export default function EditorPage() {
               "pages",
               "layers"
             ] as LeftTab[]
-          ).map((item) => (
+          ).map((tab) => (
             <button
-              key={item}
+              key={tab}
               type="button"
               className={
-                leftTab === item
+                leftTab === tab
                   ? "active"
                   : ""
               }
               onClick={() =>
-                setLeftTab(item)
+                setLeftTab(tab)
+              }
+              title={
+                tab[0].toUpperCase() +
+                tab.slice(1)
               }
             >
-              {item[0].toUpperCase()}
+              {tab[0].toUpperCase()}
             </button>
           ))}
         </aside>
@@ -2887,10 +3434,13 @@ export default function EditorPage() {
             </strong>
 
             <span>
-              {leftTab === "layers"
+              {leftTab ===
+              "layers"
                 ? allNodes.length
-                : leftTab === "pages"
-                  ? site.pages.length
+                : leftTab ===
+                    "pages"
+                  ? site.pages
+                      .length
                   : ""}
             </span>
           </div>
@@ -2898,73 +3448,103 @@ export default function EditorPage() {
           {leftTab ===
             "components" && (
             <>
-              <div className="panel-subtitle">
-                Add elements
+              <input
+                className="panel-search"
+                value={search}
+                onChange={(
+                  event
+                ) =>
+                  setSearch(
+                    event.target
+                      .value
+                  )
+                }
+                placeholder="Search elements"
+              />
+
+              <p className="panel-hint">
+                Drag anything to
+                the insertion
+                line. Drop inside
+                a highlighted
+                section to nest it.
+              </p>
+
+              <div className="palette-grid">
+                {filteredComponents.map(
+                  (type) => (
+                    <div
+                      key={type}
+                      className="palette-card"
+                      draggable
+                      onDragStart={(
+                        event
+                      ) =>
+                        paletteDrag(
+                          event,
+                          {
+                            kind:
+                              "component",
+                            componentType:
+                              type
+                          },
+                          componentInfo[
+                            type
+                          ].label
+                        )
+                      }
+                    >
+                      <b>
+                        {
+                          componentInfo[
+                            type
+                          ].icon
+                        }
+                      </b>
+
+                      <span>
+                        {
+                          componentInfo[
+                            type
+                          ].label
+                        }
+                      </span>
+
+                      <small>
+                        Drag
+                      </small>
+                    </div>
+                  )
+                )}
               </div>
-
-              {(
-                [
-                  "section",
-                  "heading",
-                  "text",
-                  "image",
-                  "button"
-                ] as ComponentType[]
-              ).map((type) => (
-                <div
-                  key={type}
-                  className="palette-card"
-                  draggable
-                  onDragStart={(event) =>
-                    paletteDrag(
-                      event,
-                      {
-                        kind:
-                          "component",
-                        componentType:
-                          type
-                      },
-                      type
-                    )
-                  }
-                >
-                  <span className="palette-icon">
-                    {type ===
-                    "section"
-                      ? "▦"
-                      : type ===
-                          "heading"
-                        ? "T"
-                        : type ===
-                            "text"
-                          ? "≡"
-                          : type ===
-                              "image"
-                            ? "▧"
-                            : "→"}
-                  </span>
-
-                  <span>
-                    {type[0].toUpperCase() +
-                      type.slice(1)}
-                  </span>
-
-                  <span className="add-symbol">
-                    +
-                  </span>
-                </div>
-              ))}
             </>
           )}
 
           {leftTab ===
             "templates" && (
             <>
-              <div className="panel-subtitle">
-                Ready-made sections
-              </div>
+              <input
+                className="panel-search"
+                value={search}
+                onChange={(
+                  event
+                ) =>
+                  setSearch(
+                    event.target
+                      .value
+                  )
+                }
+                placeholder="Search templates"
+              />
 
-              {templates.map(
+              <p className="panel-hint">
+                Templates are full
+                sections. They can
+                be inserted into
+                existing sections.
+              </p>
+
+              {filteredTemplates.map(
                 (template) => (
                   <div
                     key={template.id}
@@ -2988,6 +3568,7 @@ export default function EditorPage() {
                     <strong>
                       {template.name}
                     </strong>
+
                     <span>
                       {
                         template.description
@@ -2999,12 +3580,15 @@ export default function EditorPage() {
             </>
           )}
 
-          {leftTab === "pages" && (
+          {leftTab ===
+            "pages" && (
             <>
               <button
                 type="button"
                 className="full-button"
-                onClick={createPage}
+                onClick={() =>
+                  createPage()
+                }
               >
                 + New page
               </button>
@@ -3012,15 +3596,14 @@ export default function EditorPage() {
               {site.pages.map(
                 (page) => (
                   <button
-                    key={page.id}
                     type="button"
-                    className={[
-                      "page-list-item",
-                      activePageId ===
-                      page.id
+                    key={page.id}
+                    className={`page-list-item ${
+                      page.id ===
+                      activePageId
                         ? "active"
                         : ""
-                    ].join(" ")}
+                    }`}
                     onClick={() => {
                       setActivePageId(
                         page.id
@@ -3033,10 +3616,13 @@ export default function EditorPage() {
                       );
                     }}
                   >
-                    {page.name}
                     <span>
-                      {page.slug}
+                      {page.name}
                     </span>
+
+                    <small>
+                      {page.slug}
+                    </small>
                   </button>
                 )
               )}
@@ -3054,26 +3640,64 @@ export default function EditorPage() {
                 <button
                   type="button"
                   onClick={
+                    renamePage
+                  }
+                >
+                  Rename
+                </button>
+
+                <button
+                  type="button"
+                  onClick={
                     deletePage
                   }
                   disabled={
-                    site.pages.length <=
-                    1
+                    site.pages
+                      .length <= 1
                   }
                 >
                   Delete
                 </button>
               </div>
+
+              <div className="page-templates">
+                <small>
+                  Start from template
+                </small>
+
+                {templates
+                  .slice(0, 6)
+                  .map(
+                    (template) => (
+                      <button
+                        type="button"
+                        key={
+                          template.id
+                        }
+                        onClick={() =>
+                          createPage(
+                            template
+                          )
+                        }
+                      >
+                        {
+                          template.name
+                        }
+                      </button>
+                    )
+                  )}
+              </div>
             </>
           )}
 
-          {leftTab === "layers" && (
+          {leftTab ===
+            "layers" && (
             <div className="layer-list">
               {allNodes.map(
                 (item) => (
                   <button
-                    key={item.id}
                     type="button"
+                    key={item.id}
                     className={
                       selectedIds.includes(
                         item.id
@@ -3089,8 +3713,13 @@ export default function EditorPage() {
                     }
                   >
                     <span>
-                      {item.type}
+                      {
+                        componentInfo[
+                          item.type
+                        ].label
+                      }
                     </span>
+
                     <small>
                       {item.id.slice(
                         0,
@@ -3111,30 +3740,36 @@ export default function EditorPage() {
             startMarquee
           }
           onDragOver={
-            canvasDragOver
+            onCanvasDragOver
           }
-          onDrop={(event) =>
-            handleDrop(event)
+          onDrop={
+            handleDrop
           }
         >
           <div className="canvas-toolbar">
-            <span>
-              {activePage.name}
-            </span>
+            <div>
+              <strong>
+                {activePage.name}
+              </strong>
 
-            <span className="canvas-size">
-              {canvasWidth}px
-            </span>
+              <span>
+                {activePage.slug}
+              </span>
+            </div>
 
-            <div className="zoom-controls">
+            <div className="canvas-toolbar-right">
+              <span>
+                {canvasWidth}px
+              </span>
+
               <button
                 type="button"
                 onClick={() =>
                   setZoom(
                     (value) =>
                       Math.max(
-                        40,
-                        value - 10
+                        35,
+                        value - 5
                       )
                   )
                 }
@@ -3142,7 +3777,9 @@ export default function EditorPage() {
                 −
               </button>
 
-              <span>{zoom}%</span>
+              <span>
+                {zoom}%
+              </span>
 
               <button
                 type="button"
@@ -3150,8 +3787,8 @@ export default function EditorPage() {
                   setZoom(
                     (value) =>
                       Math.min(
-                        120,
-                        value + 10
+                        125,
+                        value + 5
                       )
                   )
                 }
@@ -3170,114 +3807,105 @@ export default function EditorPage() {
             </div>
           </div>
 
-          {preview ? (
+          {dragLabel && (
+            <div className="drag-banner">
+              {dragLabel}
+
+              {dropTarget ? (
+                <span>
+                  {" · "}
+                  {dropTarget.position ===
+                  "inside"
+                    ? `Inside section ${
+                        dropTarget.sectionId?.slice(
+                          0,
+                          6
+                        ) ?? ""
+                      }`
+                    : `${dropTarget.position} component`}
+                </span>
+              ) : null}
+            </div>
+          )}
+
+          <div className="canvas-scroll">
             <div
-              className="inline-preview"
-              data-sytely-theme={
-                theme
-              }
+              className="canvas-scale"
               style={{
-                background:
-                  activePageBackground,
-                ...themeVars(
-                  theme
-                )
+                width: canvasWidth,
+                transform: `scale(${
+                  zoom / 100
+                })`,
+                transformOrigin:
+                  "top center"
               }}
             >
-              {activePage.components.map(
-                (item) => (
-                  <div key={item.id}>
-                    {renderNode(item)}
-                  </div>
-                )
-              )}
-            </div>
-          ) : (
-            <div className="canvas-scroll">
               <div
-                className="canvas-scale"
+                className={`page-frame ${
+                  pageSelected
+                    ? "page-selected"
+                    : ""
+                }`}
+                data-sytely-theme={
+                  theme
+                }
                 style={{
-                  width: canvasWidth,
-                  transform: `scale(${
-                    zoom / 100
-                  })`,
-                  transformOrigin:
-                    "top center"
+                  ...themeVars(
+                    theme
+                  ),
+                  background:
+                    activePageBackground,
+                  paddingTop:
+                    activePage
+                      .margins
+                      .top,
+                  paddingRight:
+                    activePage
+                      .margins
+                      .right,
+                  paddingBottom:
+                    activePage
+                      .margins
+                      .bottom +
+                    100,
+                  paddingLeft:
+                    activePage
+                      .margins
+                      .left
+                }}
+                onPointerDown={(
+                  event
+                ) => {
+                  if (
+                    event.target ===
+                    event.currentTarget
+                  ) {
+                    selectPage();
+                  }
                 }}
               >
-                <div
-                  className={[
-                    "page-frame",
-                    pageSelected
-                      ? "page-selected"
-                      : ""
-                  ].join(" ")}
-                  data-sytely-theme={
-                    theme
-                  }
-                  style={{
-                    background:
-                      activePageBackground,
-                    ...themeVars(
-                      theme
-                    ),
-                    paddingTop:
-                      activePage
-                        .margins.top,
-                    paddingRight:
-                      activePage
-                        .margins.right,
-                    paddingBottom:
-                      activePage
-                        .margins
-                        .bottom +
-                      96,
-                    paddingLeft:
-                      activePage
-                        .margins.left
-                  }}
-                  onPointerDown={(
-                    event
-                  ) => {
-                    if (
-                      event.target ===
-                      event.currentTarget
-                    ) {
-                      selectPage();
-                    }
-                  }}
-                >
-                  {activePage
-                    .components
-                    .length ===
-                    0 && (
-                    <div className="empty-page">
-                      Drop a section here
-                      or choose a starter
-                      from Templates.
-                    </div>
-                  )}
-
-                  {activePage.components.map(
+                {activePage
+                  .components
+                  .length === 0 ? (
+                  <div className="empty-page">
+                    Drop a section
+                    here or choose
+                    a template.
+                  </div>
+                ) : (
+                  activePage.components.map(
                     (item) => (
                       <EditorNode
                         key={item.id}
-                        nodeItem={item}
+                        item={item}
                         selectedIds={
                           selectedIds
                         }
-                        dropTarget={
-                          dropTarget
+                        onSelect={
+                          select
                         }
-                        onSelect={select}
                         onDragStart={
-                          nodeDrag
-                        }
-                        onDragOver={
-                          nodeDragOver
-                        }
-                        onDrop={
-                          handleDrop
+                          nodeDragStart
                         }
                         onDragEnd={() => {
                           setDropTarget(
@@ -3287,17 +3915,52 @@ export default function EditorPage() {
                             null
                           );
                         }}
-                        onResizeStart={
-                          startResize
+                        onDragOver={(
+                          event
+                        ) => {
+                          event.preventDefault();
+
+                          const target =
+                            computeDropTarget(
+                              event
+                            );
+
+                          if (target) {
+                            setDropTarget(
+                              target
+                            );
+                          }
+                        }}
+                        onDrop={
+                          handleDrop
                         }
-                        onDelete={
-                          deleteNode
-                        }
+                        device={device}
                       />
                     )
-                  )}
-                </div>
+                  )
+                )}
               </div>
+            </div>
+          </div>
+
+          {dropStyle && (
+            <div
+              className={`drop-overlay ${
+                dropTarget?.position ===
+                "inside"
+                  ? "inside"
+                  : "line"
+              }`}
+              style={
+                dropStyle as CSSProperties
+              }
+            >
+              {dropTarget?.position ===
+                "inside" && (
+                <span>
+                  Drop into section
+                </span>
+              )}
             </div>
           )}
 
@@ -3325,19 +3988,7 @@ export default function EditorPage() {
             />
           )}
 
-          {dragLabel && (
-            <div
-              className="drag-ghost"
-              style={{
-                left:
-                  dragPoint.x + 12,
-                top:
-                  dragPoint.y + 12
-              }}
-            >
-              {dragLabel}
-            </div>
-          )}
+          {renderSelectionOverlay()}
 
           {selectedIds.length >
             0 &&
@@ -3350,7 +4001,7 @@ export default function EditorPage() {
                   event.stopPropagation()
                 }
               >
-                <span>
+                <span className="selection-count">
                   {selectedIds.length}{" "}
                   selected
                 </span>
@@ -3362,6 +4013,24 @@ export default function EditorPage() {
                   }
                 >
                   Duplicate
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    moveSelected(-1)
+                  }
+                >
+                  Move up
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    moveSelected(1)
+                  }
+                >
+                  Move down
                 </button>
 
                 <button
@@ -3383,9 +4052,14 @@ export default function EditorPage() {
                     ungroupSelected
                   }
                   disabled={
-                    !selectedNode
-                      ?.children
-                      ?.length
+                    !selectedNode ||
+                    selectedNode.type !==
+                      "section" ||
+                    !(
+                      selectedNode
+                        .children
+                        ?.length
+                    )
                   }
                 >
                   Ungroup
@@ -3393,12 +4067,10 @@ export default function EditorPage() {
 
                 <button
                   type="button"
-                  className="danger-text"
-                  onClick={() =>
-                    selectedIds.forEach(
-                      deleteNode
-                    )
+                  onClick={
+                    deleteSelected
                   }
+                  className="danger-text"
                 >
                   Delete
                 </button>
@@ -3412,341 +4084,719 @@ export default function EditorPage() {
               {pageSelected ||
               !selectedNodes.length
                 ? "Page"
-                : nodeTypeLabel}
+                : selectedNodes.length >
+                    1
+                  ? `${selectedNodes.length} elements`
+                  : componentInfo[
+                      selectedNode?.type ??
+                        "section"
+                    ].label}
             </strong>
-
-            <span>
-              {selectedNodes.length >
-              1
-                ? `${selectedNodes.length} selected`
-                : ""}
-            </span>
           </div>
 
-          {pageSelected ||
-          !selectedNodes.length ? (
-            <div className="inspector-scroll">
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Page design
-                </div>
+          <div className="inspector-scroll">
+            {pageSelected ||
+            !selectedNode ? (
+              <>
+                <div className="inspector-section">
+                  <div className="inspector-title">
+                    Page
+                  </div>
 
-                <label>
-                  Page name
-                  <input
-                    value={
-                      activePage.name
-                    }
-                    onChange={(event) =>
-                      updatePage(
-                        (page) => ({
-                          ...page,
-                          name: event
-                            .target
-                            .value
-                        })
-                      )
-                    }
-                  />
-                </label>
+                  <label>
+                    Theme
 
-                <label>
-                  Theme
-                  <select
-                    value={theme}
-                    onChange={(event) =>
-                      updatePageStyle(
-                        "theme",
-                        event.target
-                          .value as ThemeMode
-                      )
-                    }
-                  >
-                    <option value="system">
-                      System
-                    </option>
-                    <option value="light">
-                      Light
-                    </option>
-                    <option value="dark">
-                      Dark
-                    </option>
-                  </select>
-                </label>
-
-                <label>
-                  Background
-                  <input
-                    value={
-                      activePageBackground
-                    }
-                    onChange={(event) =>
-                      updatePageStyle(
-                        "background",
-                        event.target.value
-                      )
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Page margins
-                </div>
-
-                {(
-                  [
-                    "top",
-                    "right",
-                    "bottom",
-                    "left"
-                  ] as const
-                ).map((key) => (
-                  <label key={key}>
-                    {key}
-                    <input
-                      type="number"
-                      value={
-                        activePage
-                          .margins[key]
+                    <select
+                      value={theme}
+                      onChange={(
+                        event
+                      ) =>
+                        updatePage(
+                          (page) => ({
+                            ...page,
+                            styles: {
+                              ...(page.styles ??
+                                {}),
+                              theme:
+                                event
+                                  .target
+                                  .value
+                            }
+                          })
+                        )
                       }
-                      onChange={(event) =>
-                        updatePageMargin(
-                          key,
-                          Number(
-                            event.target
-                              .value
-                          )
+                    >
+                      <option value="system">
+                        System
+                      </option>
+                      <option value="light">
+                        Light
+                      </option>
+                      <option value="dark">
+                        Dark
+                      </option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Background
+
+                    <input
+                      value={
+                        activePageBackground
+                      }
+                      onChange={(
+                        event
+                      ) =>
+                        updatePage(
+                          (page) => ({
+                            ...page,
+                            styles: {
+                              ...(page.styles ??
+                                {}),
+                              background:
+                                event
+                                  .target
+                                  .value
+                            }
+                          })
                         )
                       }
                     />
                   </label>
-                ))}
-              </div>
-            </div>
-          ) : selectedNodes.length >
-            1 ? (
-            <div className="inspector-scroll">
-              <div className="multi-selection">
-                {selectedNodes.length}{" "}
-                items selected
-              </div>
-
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Alignment
                 </div>
 
-                <div className="alignment-grid">
-                  {alignmentButton(
-                    "Left",
-                    "flex-start",
-                    "alignSelf"
-                  )}
-                  {alignmentButton(
-                    "Center",
-                    "center",
-                    "alignSelf"
-                  )}
-                  {alignmentButton(
-                    "Right",
-                    "flex-end",
-                    "alignSelf"
-                  )}
-                </div>
-              </div>
-
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Size
-                </div>
-
-                <label>
-                  Width
-                  <input
-                    type="number"
-                    onChange={(event) =>
-                      setNodeStyle(
-                        "width",
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    }
-                  />
-                </label>
-
-                <label>
-                  Height
-                  <input
-                    type="number"
-                    onChange={(event) =>
-                      setNodeStyle(
-                        "height",
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-          ) : (
-            <div className="inspector-scroll">
-              <div className="inspector-section">
-                <div className="inspector-title">
-                  Element
-                </div>
-
-                <div className="readonly-type">
-                  Type
-                  <strong>
-                    {selectedNode?.type}
-                  </strong>
-                </div>
-              </div>
-
-              {selectedNode?.type ===
-                "section" && (
                 <div className="inspector-section">
                   <div className="inspector-title">
-                    Alignment
-                  </div>
-
-                  <div className="alignment-group">
-                    <span>
-                      Horizontal
-                    </span>
-
-                    <div className="alignment-grid">
-                      {alignmentButton(
-                        "Left",
-                        "flex-start",
-                        "alignItems"
-                      )}
-                      {alignmentButton(
-                        "Center",
-                        "center",
-                        "alignItems"
-                      )}
-                      {alignmentButton(
-                        "Right",
-                        "flex-end",
-                        "alignItems"
-                      )}
-                    </div>
-
-                    <span>
-                      Vertical
-                    </span>
-
-                    <div className="alignment-grid">
-                      {alignmentButton(
-                        "Top",
-                        "flex-start",
-                        "justifyContent"
-                      )}
-                      {alignmentButton(
-                        "Center",
-                        "center",
-                        "justifyContent"
-                      )}
-                      {alignmentButton(
-                        "Bottom",
-                        "flex-end",
-                        "justifyContent"
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {selectedNode?.type ===
-                "section" && (
-                <div className="inspector-section">
-                  <div className="inspector-title">
-                    Spacing
+                    Page spacing
                   </div>
 
                   {(
                     [
-                      "paddingTop",
-                      "paddingRight",
-                      "paddingBottom",
-                      "paddingLeft"
+                      "top",
+                      "right",
+                      "bottom",
+                      "left"
                     ] as const
                   ).map((key) => (
                     <label key={key}>
-                      {key.replace(
-                        "padding",
-                        ""
-                      )}
+                      {key}
 
                       <input
                         type="number"
-                        value={parseNumber(
-                          styleValue(
-                            selectedNode,
+                        value={
+                          activePage
+                            .margins[
                             key
-                          ),
-                          key.includes(
-                            "Top"
-                          ) ||
-                            key.includes(
-                              "Bottom"
-                            )
-                            ? DEFAULT_SECTION_PADDING
-                            : 40
-                        )}
+                          ]
+                        }
                         onChange={(
                           event
                         ) =>
-                          setNodeStyle(
-                            key,
-                            Number(
-                              event.target
-                                .value
-                            )
+                          updatePage(
+                            (page) => ({
+                              ...page,
+                              margins: {
+                                ...page.margins,
+                                [key]:
+                                  Math.max(
+                                    0,
+                                    Number(
+                                      event
+                                        .target
+                                        .value
+                                    )
+                                  )
+                              }
+                            })
                           )
                         }
                       />
                     </label>
                   ))}
                 </div>
-              )}
-
-              {selectedNode?.type ===
-                "section" && (
+              </>
+            ) : (
+              <>
                 <div className="inspector-section">
                   <div className="inspector-title">
-                    Appearance
+                    Element
+                  </div>
+
+                  <div className="readonly-type">
+                    <span>
+                      Type
+                    </span>
+
+                    <strong>
+                      {
+                        componentInfo[
+                          selectedNode.type
+                        ].label
+                      }
+                    </strong>
+                  </div>
+                </div>
+
+                {(
+                  selectedNode.type ===
+                    "heading" ||
+                  selectedNode.type ===
+                    "text" ||
+                  selectedNode.type ===
+                    "button" ||
+                  selectedNode.type ===
+                    "logo" ||
+                  selectedNode.type ===
+                    "footer" ||
+                  selectedNode.type ===
+                    "testimonial" ||
+                  selectedNode.type ===
+                    "card"
+                ) && (
+                  <div className="inspector-section">
+                    <label>
+                      {selectedNode.type ===
+                        "button" ||
+                      selectedNode.type ===
+                        "logo"
+                        ? "Label"
+                        : "Text"}
+
+                      {selectedNode.type ===
+                        "text" ||
+                      selectedNode.type ===
+                        "heading" ||
+                      selectedNode.type ===
+                        "testimonial" ? (
+                        <textarea
+                          value={String(
+                            selectedNode
+                              .props
+                              .text ??
+                              ""
+                          )}
+                          onChange={(
+                            event
+                          ) =>
+                            updateNodeProp(
+                              "text",
+                              event
+                                .target
+                                .value
+                            )
+                          }
+                        />
+                      ) : (
+                        <input
+                          value={String(
+                            selectedNode
+                              .props
+                              .text ??
+                              selectedNode
+                                .props
+                                .title ??
+                              ""
+                          )}
+                          onChange={(
+                            event
+                          ) =>
+                            updateNodeProp(
+                              selectedNode.type ===
+                                "card"
+                                ? "title"
+                                : "text",
+                              event
+                                .target
+                                .value
+                            )
+                          }
+                        />
+                      )}
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "card" && (
+                  <div className="inspector-section">
+                    <label>
+                      Description
+
+                      <textarea
+                        value={String(
+                          selectedNode
+                            .props
+                            .text ??
+                            ""
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "text",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "testimonial" && (
+                  <div className="inspector-section">
+                    <label>
+                      Author
+
+                      <input
+                        value={String(
+                          selectedNode
+                            .props
+                            .author ??
+                            ""
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "author",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "image" && (
+                  <div className="inspector-section">
+                    <label>
+                      Image URL
+
+                      <input
+                        value={String(
+                          selectedNode
+                            .props
+                            .src ??
+                            ""
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "src",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      Alt text
+
+                      <input
+                        value={String(
+                          selectedNode
+                            .props
+                            .alt ??
+                            ""
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "alt",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "video" && (
+                  <div className="inspector-section">
+                    <label>
+                      Video URL
+
+                      <input
+                        value={String(
+                          selectedNode
+                            .props
+                            .src ??
+                            ""
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "src",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "icon" && (
+                  <div className="inspector-section">
+                    <label>
+                      Icon
+
+                      <input
+                        value={String(
+                          selectedNode
+                            .props
+                            .icon ??
+                            "✦"
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "icon",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "menu" && (
+                  <div className="inspector-section">
+                    <label>
+                      Menu items
+
+                      <input
+                        value={
+                          Array.isArray(
+                            selectedNode
+                              .props
+                              .items
+                          )
+                            ? selectedNode
+                                .props
+                                .items
+                                .join(
+                                  ", "
+                                )
+                            : ""
+                        }
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "items",
+                            event.target.value
+                              .split(
+                                ","
+                              )
+                              .map(
+                                (
+                                  item
+                                ) =>
+                                  item.trim()
+                              )
+                              .filter(
+                                Boolean
+                              )
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "contact" && (
+                  <div className="inspector-section">
+                    <label>
+                      Email
+
+                      <input
+                        value={String(
+                          selectedNode
+                            .props
+                            .email ??
+                            ""
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "email",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      Phone
+
+                      <input
+                        value={String(
+                          selectedNode
+                            .props
+                            .phone ??
+                            ""
+                        )}
+                        onChange={(
+                          event
+                        ) =>
+                          updateNodeProp(
+                            "phone",
+                            event
+                              .target
+                              .value
+                          )
+                        }
+                      />
+                    </label>
+                  </div>
+                )}
+
+                {selectedNode.type ===
+                  "section" && (
+                  <div className="inspector-section">
+                    <div className="inspector-title">
+                      Alignment
+                    </div>
+
+                    <div className="alignment-grid">
+                      {[
+                        [
+                          "Left",
+                          "flex-start"
+                        ],
+                        [
+                          "Center",
+                          "center"
+                        ],
+                        [
+                          "Right",
+                          "flex-end"
+                        ]
+                      ].map(
+                        ([
+                          label,
+                          value
+                        ]) => (
+                          <button
+                            key={
+                              label
+                            }
+                            type="button"
+                            className={
+                              styleValue(
+                                selectedNode,
+                                "alignItems"
+                              ) ===
+                              value
+                                ? "active"
+                                : ""
+                            }
+                            onClick={() =>
+                              updateNodeStyles(
+                                "alignItems",
+                                value
+                              )
+                            }
+                          >
+                            {label}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="inspector-section">
+                  <div className="inspector-title">
+                    Responsive{" "}
+                    {device}
                   </div>
 
                   <label>
-                    Background
+                    Width
+
                     <input
+                      value={String(
+                        styleInput(
+                          "width"
+                        ) ?? ""
+                      )}
+                      onChange={(
+                        event
+                      ) =>
+                        updateNodeStyles(
+                          "width",
+                          event
+                            .target
+                            .value ===
+                            ""
+                            ? "auto"
+                            : Number(
+                                event
+                                  .target
+                                  .value
+                              )
+                        )
+                      }
+                      placeholder="Auto"
+                    />
+                  </label>
+
+                  <label>
+                    Font size
+
+                    <input
+                      type="number"
+                      value={String(
+                        styleInput(
+                          "fontSize"
+                        ) ?? ""
+                      )}
+                      onChange={(
+                        event
+                      ) =>
+                        updateNodeStyles(
+                          "fontSize",
+                          Number(
+                            event
+                              .target
+                              .value
+                          )
+                        )
+                      }
+                      placeholder="Auto"
+                    />
+                  </label>
+
+                  <label>
+                    Device override
+                    width
+
+                    <input
+                      value={String(
+                        styleInput(
+                          "width",
+                          true
+                        ) ?? ""
+                      )}
+                      onChange={(
+                        event
+                      ) =>
+                        setResponsiveStyle(
+                          "width",
+                          event
+                            .target
+                            .value ===
+                            ""
+                            ? "auto"
+                            : Number(
+                                event
+                                  .target
+                                  .value
+                              )
+                        )
+                      }
+                      placeholder="Auto"
+                    />
+                  </label>
+                </div>
+
+                <div className="inspector-section">
+                  <div className="inspector-title">
+                    Layout
+                  </div>
+
+                  <label>
+                    Display
+
+                    <select
                       value={String(
                         styleValue(
                           selectedNode,
-                          "background"
+                          "display"
                         ) ?? ""
                       )}
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "background",
-                          event.target
+                      onChange={(
+                        event
+                      ) =>
+                        updateNodeStyles(
+                          "display",
+                          event
+                            .target
                             .value
+                        )
+                      }
+                    >
+                      <option value="">
+                        Default
+                      </option>
+
+                      <option value="flex">
+                        Flex
+                      </option>
+
+                      <option value="grid">
+                        Grid
+                      </option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Gap
+
+                    <input
+                      type="number"
+                      value={parseNumber(
+                        styleValue(
+                          selectedNode,
+                          "gap"
+                        ),
+                        24
+                      )}
+                      onChange={(
+                        event
+                      ) =>
+                        updateNodeStyles(
+                          "gap",
+                          Number(
+                            event
+                              .target
+                              .value
+                          )
                         )
                       }
                     />
                   </label>
 
                   <label>
-                    Radius
+                    Border radius
+
                     <input
                       type="number"
                       value={parseNumber(
@@ -3756,11 +4806,14 @@ export default function EditorPage() {
                         ),
                         0
                       )}
-                      onChange={(event) =>
-                        setNodeStyle(
+                      onChange={(
+                        event
+                      ) =>
+                        updateNodeStyles(
                           "borderRadius",
                           Number(
-                            event.target
+                            event
+                              .target
                               .value
                           )
                         )
@@ -3768,314 +4821,25 @@ export default function EditorPage() {
                     />
                   </label>
                 </div>
-              )}
 
-              {(selectedNode?.type ===
-                "heading" ||
-                selectedNode?.type ===
-                  "text" ||
-                selectedNode?.type ===
-                  "button") && (
                 <div className="inspector-section">
                   <label>
-                    {selectedNode.type ===
-                    "button"
-                      ? "Label"
-                      : "Text"}
-
-                    {selectedNode.type ===
-                      "text" ||
-                    selectedNode.type ===
-                      "heading" ? (
-                      <textarea
-                        value={String(
-                          selectedNode
-                            .props.text ??
-                            ""
-                        )}
-                        onChange={(
-                          event
-                        ) =>
-                          setNodeProp(
-                            "text",
-                            event.target
-                              .value
-                          )
-                        }
-                      />
-                    ) : (
-                      <input
-                        value={String(
-                          selectedNode
-                            .props.text ??
-                            ""
-                        )}
-                        onChange={(
-                          event
-                        ) =>
-                          setNodeProp(
-                            "text",
-                            event.target
-                              .value
-                          )
-                        }
-                      />
-                    )}
-                  </label>
-
-                  <label>
-                    Font size
-                    <input
-                      type="number"
-                      value={parseNumber(
-                        styleValue(
-                          selectedNode,
-                          "fontSize"
-                        ),
-                        selectedNode.type ===
-                          "heading"
-                          ? 32
-                          : 16
-                      )}
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "fontSize",
-                          Number(
-                            event.target
-                              .value
-                          )
-                        )
-                      }
-                    />
-                  </label>
-
-                  {selectedNode.type ===
-                    "heading" && (
-                    <label>
-                      Weight
-                      <select
-                        value={String(
-                          styleValue(
-                            selectedNode,
-                            "fontWeight"
-                          ) ?? 700
-                        )}
-                        onChange={(
-                          event
-                        ) =>
-                          setNodeStyle(
-                            "fontWeight",
-                            event.target
-                              .value
-                          )
-                        }
-                      >
-                        <option value="400">
-                          400
-                        </option>
-                        <option value="500">
-                          500
-                        </option>
-                        <option value="600">
-                          600
-                        </option>
-                        <option value="700">
-                          700
-                        </option>
-                      </select>
-                    </label>
-                  )}
-
-                  {selectedNode.type ===
-                    "button" && (
-                    <label>
-                      Background
-                      <input
-                        value={String(
-                          styleValue(
-                            selectedNode,
-                            "background"
-                          ) ??
-                            "var(--sytely-accent)"
-                        )}
-                        onChange={(event) =>
-                          setNodeStyle(
-                            "background",
-                            event.target
-                              .value
-                          )
-                        }
-                      />
-                    </label>
-                  )}
-                </div>
-              )}
-
-              {selectedNode?.type ===
-                "image" && (
-                <div className="inspector-section">
-                  <label>
-                    Image URL
-                    <input
-                      value={String(
-                        selectedNode.props
-                          .src ?? ""
-                      )}
-                      onChange={(event) =>
-                        setNodeProp(
-                          "src",
-                          event.target
-                            .value
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Alt text
-                    <input
-                      value={String(
-                        selectedNode.props
-                          .alt ?? ""
-                      )}
-                      onChange={(event) =>
-                        setNodeProp(
-                          "alt",
-                          event.target
-                            .value
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              {selectedNode &&
-                selectedNode.type !==
-                  "section" && (
-                  <div className="inspector-section">
-                    <div className="inspector-title">
-                      Alignment
-                    </div>
-
-                    <div className="alignment-grid">
-                      {alignmentButton(
-                        "Left",
-                        "flex-start",
-                        "alignSelf"
-                      )}
-                      {alignmentButton(
-                        "Center",
-                        "center",
-                        "alignSelf"
-                      )}
-                      {alignmentButton(
-                        "Right",
-                        "flex-end",
-                        "alignSelf"
-                      )}
-                    </div>
-                  </div>
-                )}
-
-              {selectedNode && (
-                <div className="inspector-section">
-                  <div className="inspector-title">
-                    Size
-                  </div>
-
-                  <label>
-                    Width
-                    <input
-                      type="number"
-                      value={
-                        typeof styleValue(
-                          selectedNode,
-                          "width"
-                        ) ===
-                        "number"
-                          ? Number(
-                              styleValue(
-                                selectedNode,
-                                "width"
-                              )
-                            )
-                          : ""
-                      }
-                      placeholder="Auto"
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "width",
-                          event.target
-                            .value ===
-                            ""
-                            ? "auto"
-                            : Number(
-                                event
-                                  .target
-                                  .value
-                              )
-                        )
-                      }
-                    />
-                  </label>
-
-                  <label>
-                    Height
-                    <input
-                      type="number"
-                      value={
-                        typeof styleValue(
-                          selectedNode,
-                          "height"
-                        ) ===
-                        "number"
-                          ? Number(
-                              styleValue(
-                                selectedNode,
-                                "height"
-                              )
-                            )
-                          : ""
-                      }
-                      placeholder="Auto"
-                      onChange={(event) =>
-                        setNodeStyle(
-                          "height",
-                          event.target
-                            .value ===
-                            ""
-                            ? "auto"
-                            : Number(
-                                event
-                                  .target
-                                  .value
-                              )
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-              )}
-
-              {selectedNode &&
-                selectedNode.type !==
-                  "section" && (
-                  <div className="inspector-section">
-                    <div className="inspector-title">
-                      Link
-                    </div>
+                    Link
 
                     <select
                       value={String(
-                        selectedNode.props
+                        selectedNode
+                          .props
                           .linkTo ??
                           ""
                       )}
-                      onChange={(event) =>
-                        setNodeProp(
+                      onChange={(
+                        event
+                      ) =>
+                        updateNodeProp(
                           "linkTo",
-                          event.target
+                          event
+                            .target
                             .value
                         )
                       }
@@ -4087,7 +4851,9 @@ export default function EditorPage() {
                       {site.pages.map(
                         (page) => (
                           <option
-                            key={page.id}
+                            key={
+                              page.id
+                            }
                             value={
                               page.slug
                             }
@@ -4097,25 +4863,23 @@ export default function EditorPage() {
                         )
                       )}
                     </select>
-                  </div>
-                )}
+                  </label>
+                </div>
 
-              <div className="inspector-section">
-                <button
-                  type="button"
-                  className="danger-button"
-                  onClick={() =>
-                    selectedNode &&
-                    deleteNode(
-                      selectedNode.id
-                    )
-                  }
-                >
-                  Delete element
-                </button>
-              </div>
-            </div>
-          )}
+                <div className="inspector-section">
+                  <button
+                    type="button"
+                    className="danger-button"
+                    onClick={
+                      deleteSelected
+                    }
+                  >
+                    Delete element
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </aside>
 
         <aside className="side-rail right-rail">
@@ -4125,141 +4889,28 @@ export default function EditorPage() {
               "layout",
               "position"
             ] as RightTab[]
-          ).map((item) => (
+          ).map((tab) => (
             <button
-              key={item}
+              key={tab}
               type="button"
               className={
-                rightTab === item
+                rightTab === tab
                   ? "active"
                   : ""
               }
               onClick={() =>
-                setRightTab(item)
+                setRightTab(tab)
+              }
+              title={
+                tab[0].toUpperCase() +
+                tab.slice(1)
               }
             >
-              {item[0].toUpperCase()}
+              {tab[0].toUpperCase()}
             </button>
           ))}
         </aside>
       </div>
-
-      {rightTab !== "design" &&
-        selectedNode && (
-          <div className="quick-panel">
-            <strong>
-              {rightTab ===
-              "layout"
-                ? "Layout"
-                : "Position"}
-            </strong>
-
-            {rightTab ===
-            "layout" ? (
-              <>
-                <label>
-                  Display
-                  <select
-                    value={String(
-                      styleValue(
-                        selectedNode,
-                        "display"
-                      ) ?? ""
-                    )}
-                    onChange={(event) =>
-                      setNodeStyle(
-                        "display",
-                        event.target
-                          .value
-                      )
-                    }
-                  >
-                    <option value="">
-                      Default
-                    </option>
-                    <option value="flex">
-                      Flex
-                    </option>
-                    <option value="grid">
-                      Grid
-                    </option>
-                  </select>
-                </label>
-
-                <label>
-                  Gap
-                  <input
-                    type="number"
-                    value={parseNumber(
-                      styleValue(
-                        selectedNode,
-                        "gap"
-                      ),
-                      24
-                    )}
-                    onChange={(event) =>
-                      setNodeStyle(
-                        "gap",
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    }
-                  />
-                </label>
-              </>
-            ) : (
-              <>
-                <label>
-                  Top
-                  <input
-                    type="number"
-                    value={parseNumber(
-                      styleValue(
-                        selectedNode,
-                        "top"
-                      ),
-                      0
-                    )}
-                    onChange={(event) =>
-                      setNodeStyle(
-                        "top",
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    }
-                  />
-                </label>
-
-                <label>
-                  Left
-                  <input
-                    type="number"
-                    value={parseNumber(
-                      styleValue(
-                        selectedNode,
-                        "left"
-                      ),
-                      0
-                    )}
-                    onChange={(event) =>
-                      setNodeStyle(
-                        "left",
-                        Number(
-                          event.target
-                            .value
-                        )
-                      )
-                    }
-                  />
-                </label>
-              </>
-            )}
-          </div>
-        )}
 
       {preview && (
         <div
@@ -4273,7 +4924,8 @@ export default function EditorPage() {
             </strong>
 
             <span>
-              {activePage.name}
+              {activePage.name} ·{" "}
+              {device}
             </span>
 
             <button
@@ -4287,8 +4939,11 @@ export default function EditorPage() {
           </div>
 
           <div
-            className="full-preview-page"
+            className="preview-canvas"
             style={{
+              maxWidth:
+                canvasWidth,
+              margin: "0 auto",
               background:
                 activePageBackground,
               paddingTop:
@@ -4305,13 +4960,12 @@ export default function EditorPage() {
                   .left
             }}
           >
-            {activePage.components.map(
-              (item) => (
-                <div key={item.id}>
-                  {renderNode(item)}
-                </div>
-              )
-            )}
+            <SytelyRenderer
+              nodes={
+                activePage.components
+              }
+              device={device}
+            />
           </div>
         </div>
       )}

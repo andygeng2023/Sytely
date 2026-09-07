@@ -4,16 +4,32 @@ import {
   useEffect,
   useState
 } from "react";
-import { SytelyRenderer } from "@sytely/renderer";
+import {
+  SytelyRenderer
+} from "@sytely/renderer";
 import type { Site } from "@sytely/types";
 import "./preview.css";
 
+type Device =
+  | "desktop"
+  | "tablet"
+  | "mobile";
+
 export default function PreviewPage() {
   const [site, setSite] =
-    useState<Site | null>(null);
+    useState<Site | null>(
+      null
+    );
 
-  const [pageSlug, setPageSlug] =
-    useState("/");
+  const [
+    pageSlug,
+    setPageSlug
+  ] = useState("/");
+
+  const [device, setDevice] =
+    useState<Device>(
+      "desktop"
+    );
 
   const [error, setError] =
     useState(false);
@@ -26,8 +42,25 @@ export default function PreviewPage() {
         );
 
       setPageSlug(
-        params.get("page") ?? "/"
+        params.get("page") ??
+          "/"
       );
+
+      const requestedDevice =
+        params.get(
+          "device"
+        );
+
+      if (
+        requestedDevice ===
+          "tablet" ||
+        requestedDevice ===
+          "mobile"
+      ) {
+        setDevice(
+          requestedDevice
+        );
+      }
 
       const siteId =
         params.get("site");
@@ -42,22 +75,24 @@ export default function PreviewPage() {
           "sytely-site"
         );
 
-      const sites = rawSites
-        ? (JSON.parse(
-            rawSites
-          ) as Site[])
-        : legacy
-          ? [
-              JSON.parse(
-                legacy
-              ) as Site
-            ]
-          : [];
+      const sites: Site[] =
+        rawSites
+          ? JSON.parse(
+              rawSites
+            )
+          : legacy
+            ? [
+                JSON.parse(
+                  legacy
+                )
+              ]
+            : [];
 
       const active =
         sites.find(
           (item) =>
-            item.id === siteId
+            item.id ===
+            siteId
         ) ??
         sites.find(
           (item) =>
@@ -78,7 +113,8 @@ export default function PreviewPage() {
   if (error) {
     return (
       <main className="preview-message">
-        Could not load this preview.
+        Could not load this
+        preview.
       </main>
     );
   }
@@ -98,8 +134,10 @@ export default function PreviewPage() {
   const page =
     site.pages.find(
       (item) =>
-        item.slug === pageSlug
-    ) ?? site.pages[0];
+        item.slug ===
+        pageSlug
+    ) ??
+    site.pages[0];
 
   const theme = String(
     page.styles?.theme ??
@@ -115,31 +153,10 @@ export default function PreviewPage() {
   return (
     <main
       className="preview-root"
-      data-sytely-theme={theme}
+      data-sytely-theme={
+        theme
+      }
     >
-      <header className="preview-nav">
-        <strong>
-          {site.name}
-        </strong>
-
-        <nav>
-          {site.pages.map(
-            (item) => (
-              <a
-                key={item.id}
-                href={`/preview?site=${encodeURIComponent(
-                  site.id
-                )}&page=${encodeURIComponent(
-                  item.slug
-                )}`}
-              >
-                {item.name}
-              </a>
-            )
-          )}
-        </nav>
-      </header>
-
       <div
         className="preview-page"
         style={{
@@ -156,7 +173,10 @@ export default function PreviewPage() {
         }}
       >
         <SytelyRenderer
-          nodes={page.components}
+          nodes={
+            page.components
+          }
+          device={device}
         />
       </div>
     </main>
