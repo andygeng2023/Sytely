@@ -7,47 +7,23 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type DragEvent,
-  type ReactNode,
-  type MouseEvent as ReactMouseEvent,
+  type CSSProperties,
   type Dispatch,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   type SetStateAction,
 } from "react";
-
-import {
-  SytelyRenderer,
-} from "@sytely/renderer";
-
+import { renderNode } from "@sytely/renderer";
 import type {
   ComponentNode,
   ComponentType,
   Site,
   SitePage,
 } from "@sytely/types";
+import "./editor.css";
 
-type Device =
-  | "desktop"
-  | "tablet"
-  | "mobile";
-
-type Panel =
-  | "components"
-  | "templates"
-  | "pages"
-  | "layers";
-
-type DropPosition =
-  | "before"
-  | "after"
-  | "inside";
-
-type DropTarget = {
-  id: string | null;
-  parentId: string | null;
-  index: number;
-  position: DropPosition;
-  sectionId: string | null;
-};
+type Device = "desktop" | "tablet" | "mobile";
 
 type DragPayload =
   | {
@@ -55,59 +31,44 @@ type DragPayload =
       type: ComponentType;
     }
   | {
-      kind: "template";
-      node: ComponentNode;
-    }
-  | {
       kind: "node";
-      ids: string[];
+      nodeIds: string[];
     };
 
-const STORAGE_SITES =
-  "sytely-sites";
+const STORAGE_SITES = "sytely-sites";
+const STORAGE_LEGACY = "sytely-site";
 
-const STORAGE_LEGACY =
-  "sytely-site";
+const COMPONENTS: Array<{
+  type: ComponentType;
+  label: string;
+  icon: string;
+}> = [
+  { type: "section", label: "Section", icon: "▦" },
+  { type: "heading", label: "Heading", icon: "T" },
+  { type: "text", label: "Text", icon: "≡" },
+  { type: "button", label: "Button", icon: "→" },
+  { type: "image", label: "Image", icon: "▧" },
+  { type: "video", label: "Video", icon: "▶" },
+  { type: "gallery", label: "Gallery", icon: "▥" },
+  { type: "divider", label: "Divider", icon: "—" },
+  { type: "icon", label: "Icon", icon: "✦" },
+  { type: "logo", label: "Logo", icon: "◎" },
+  { type: "menu", label: "Menu", icon: "☰" },
+  { type: "social", label: "Social", icon: "●" },
+  { type: "form", label: "Form", icon: "□" },
+  { type: "card", label: "Card", icon: "▣" },
+  { type: "features", label: "Features", icon: "◆" },
+  { type: "pricing", label: "Pricing", icon: "$" },
+  { type: "testimonial", label: "Testimonial", icon: "“" },
+  { type: "faq", label: "FAQ", icon: "?" },
+  { type: "contact", label: "Contact", icon: "@" },
+  { type: "footer", label: "Footer", icon: "▰" },
+];
 
-const info: Record<
-  ComponentType,
-  [string, string]
-> = {
-  section: ["▦", "Section"],
-  heading: ["T", "Heading"],
-  text: ["≡", "Text"],
-  button: ["→", "Button"],
-  image: ["▧", "Image"],
-  video: ["▶", "Video"],
-  gallery: ["▥", "Gallery"],
-  divider: ["—", "Divider"],
-  icon: ["✦", "Icon"],
-  logo: ["◎", "Logo"],
-  menu: ["☰", "Menu"],
-  social: ["●", "Social"],
-  form: ["□", "Form"],
-  card: ["▣", "Card"],
-  features: ["◆", "Features"],
-  pricing: ["$", "Pricing"],
-  testimonial: [
-    "“",
-    "Testimonial",
-  ],
-  faq: ["?", "FAQ"],
-  contact: ["@", "Contact"],
-  footer: ["▰", "Footer"],
-};
-
-const types =
-  Object.keys(
-    info
-  ) as ComponentType[];
-
-function uid() {
+function createId(): string {
   if (
-    typeof crypto !==
-      "undefined" &&
-    crypto.randomUUID
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
   ) {
     return crypto.randomUUID();
   }
@@ -117,603 +78,477 @@ function uid() {
     .slice(2)}`;
 }
 
-function slugify(
-  value: string
-) {
+function slugify(value: string): string {
   return (
     value
       .toLowerCase()
       .trim()
-      .replace(
-        /[^a-z0-9]+/g,
-        "-"
-      )
-      .replace(
-        /^-+|-+$/g,
-        "") ||
-    "website"
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "website"
   );
 }
 
-function n(
-  type: ComponentType,
-  props: Record<
-    string,
-    unknown
-  > = {},
-  styles: Record<
-    string,
-    unknown
-  > = {},
-  children?: ComponentNode[]
-): ComponentNode {
+function cloneNode(node: ComponentNode): ComponentNode {
   return {
-    id: uid(),
-    type,
-    props,
-    styles,
-    ...(children
-      ? { children }
-      : {}),
+    ...node,
+    id: createId(),
+    props: { ...node.props },
+    styles: node.styles ? { ...node.styles } : undefined,
+    children: node.children?.map(cloneNode),
   };
 }
 
-function makeComponent(
-  type: ComponentType
-): ComponentNode {
+function makeNode(type: ComponentType): ComponentNode {
   switch (type) {
     case "section":
-      return n(
+      return {
+        id: createId(),
         type,
-        {},
-        {
+        props: {},
+        styles: {
           display: "grid",
-          gridTemplateColumns:
-            "1fr",
+          gridTemplateColumns: "1fr",
           gap: 24,
           paddingTop: 56,
           paddingRight: 40,
           paddingBottom: 56,
           paddingLeft: 40,
+          width: "100%",
         },
-        [
-          n(
-            "heading",
-            {
-              text:
-                "Your heading",
-            },
-            {
-              fontSize: 46,
+        children: [
+          {
+            id: createId(),
+            type: "heading",
+            props: { text: "Your heading" },
+            styles: {
+              fontSize: 48,
               fontWeight: 700,
-            }
-          ),
-          n(
-            "text",
-            {
-              text:
-                "Add your content here.",
+              lineHeight: 1.1,
             },
-            {
+          },
+          {
+            id: createId(),
+            type: "text",
+            props: {
+              text: "Add your content here.",
+            },
+            styles: {
               fontSize: 18,
-            }
-          ),
-        ]
-      );
+              lineHeight: 1.6,
+            },
+          },
+        ],
+      };
 
     case "heading":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          text:
-            "Your heading",
-        },
-        {
-          fontSize: 46,
+        props: { text: "Your heading" },
+        styles: {
+          fontSize: 48,
           fontWeight: 700,
-        }
-      );
+          lineHeight: 1.1,
+        },
+      };
 
     case "text":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          text:
-            "Add your content here.",
+        props: {
+          text: "Add your content here.",
         },
-        {
+        styles: {
           fontSize: 18,
-          maxWidth: 720,
-        }
-      );
+          lineHeight: 1.6,
+        },
+      };
 
     case "button":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          text:
-            "Get started",
+        props: {
+          text: "Get started",
           linkTo: "#",
-        }
-      );
+        },
+        styles: {
+          width: "fit-content",
+          paddingTop: 12,
+          paddingRight: 20,
+          paddingBottom: 12,
+          paddingLeft: 20,
+          borderRadius: 8,
+          fontWeight: 600,
+        },
+      };
 
     case "image":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
+        props: {
           src: "",
           alt: "Image",
         },
-        {
+        styles: {
+          width: "100%",
           maxWidth: 900,
-        }
-      );
+          borderRadius: 12,
+        },
+      };
 
     case "video":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
+        props: {
           src: "",
         },
-        {
+        styles: {
+          width: "100%",
           maxWidth: 900,
-        }
-      );
+          aspectRatio: "16 / 9",
+        },
+      };
 
     case "gallery":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          images: [],
+        props: {
           columns: 3,
-        }
-      );
+          images: [],
+        },
+        styles: {
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(3,minmax(0,1fr))",
+          gap: 16,
+          width: "100%",
+        },
+      };
 
     case "divider":
-      return n(
-        type
-      );
+      return {
+        id: createId(),
+        type,
+        props: {},
+        styles: {
+          width: "100%",
+          height: 1,
+          opacity: 0.16,
+        },
+      };
 
     case "icon":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
+        props: {
           icon: "✦",
         },
-        {
-          fontSize: 32,
-        }
-      );
+        styles: {
+          fontSize: 36,
+        },
+      };
 
     case "logo":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          text: "Sytely",
+        props: {
+          text: "Brand",
         },
-        {
+        styles: {
           fontSize: 22,
-          fontWeight: 700,
-        }
-      );
+          fontWeight: 800,
+        },
+      };
 
     case "menu":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          items: [
-            "Home",
-            "About",
-            "Contact",
-          ],
-        }
-      );
+        props: {
+          items: ["Home", "About", "Contact"],
+        },
+        styles: {
+          display: "flex",
+          gap: 20,
+        },
+      };
 
     case "social":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          items: [
-            "Instagram",
-            "X",
-            "LinkedIn",
-          ],
-        }
-      );
+        props: {
+          items: ["Instagram", "X", "LinkedIn"],
+        },
+        styles: {
+          display: "flex",
+          gap: 12,
+        },
+      };
 
     case "form":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          title:
-            "Contact us",
-          submitLabel:
-            "Send message",
-        }
-      );
+        props: {
+          title: "Contact us",
+          submitLabel: "Send message",
+        },
+        styles: {
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          maxWidth: 560,
+        },
+      };
 
     case "card":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          title:
-            "Card title",
-          text:
-            "Describe this card.",
-        }
-      );
+        props: {
+          title: "Card title",
+          text: "Describe this card.",
+        },
+        styles: {
+          padding: 24,
+          borderRadius: 16,
+        },
+      };
 
     case "features":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
+        props: {
           columns: 3,
         },
-        {
+        styles: {
           display: "grid",
           gridTemplateColumns:
             "repeat(3,minmax(0,1fr))",
-          gap: 18,
+          gap: 20,
         },
-        [
-          makeComponent(
-            "card"
-          ),
-          makeComponent(
-            "card"
-          ),
-          makeComponent(
-            "card"
-          ),
-        ]
-      );
+        children: [
+          makeNode("card"),
+          makeNode("card"),
+          makeNode("card"),
+        ],
+      };
 
     case "pricing":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
+        props: {
           columns: 3,
         },
-        {
+        styles: {
           display: "grid",
           gridTemplateColumns:
             "repeat(3,minmax(0,1fr))",
-          gap: 18,
+          gap: 20,
         },
-        [
-          n(
-            "card",
-            {
-              title:
-                "Starter",
-              text:
-                "$9 / month",
-            }
-          ),
-          n(
-            "card",
-            {
-              title: "Pro",
-              text:
-                "$24 / month",
-            }
-          ),
-          n(
-            "card",
-            {
-              title:
-                "Business",
-              text:
-                "$59 / month",
-            }
-          ),
-        ]
-      );
+        children: [
+          makeNode("card"),
+          makeNode("card"),
+          makeNode("card"),
+        ],
+      };
 
     case "testimonial":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          quote:
-            "A thoughtful product makes the whole experience easier.",
-          author:
-            "Customer",
-        }
-      );
+        props: {
+          quote: "A great experience.",
+          author: "Customer",
+        },
+        styles: {
+          padding: 28,
+          borderRadius: 16,
+        },
+      };
 
     case "faq":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          question:
-            "Frequently asked question",
-          answer:
-            "Write the answer here.",
-        }
-      );
+        props: {
+          question: "Frequently asked question",
+          answer: "Write the answer here.",
+        },
+        styles: {
+          padding: 20,
+        },
+      };
 
     case "contact":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
+        props: {
           title: "Contact",
-          email:
-            "hello@example.com",
-          phone:
-            "+1 000 000 0000",
-        }
-      );
+          email: "hello@example.com",
+          phone: "",
+        },
+        styles: {
+          padding: 32,
+        },
+      };
 
     case "footer":
-      return n(
+      return {
+        id: createId(),
         type,
-        {
-          text:
-            "© 2026 Your brand. All rights reserved.",
-        }
-      );
+        props: {
+          text: "© 2026 Your Company",
+        },
+        styles: {
+          paddingTop: 32,
+          paddingBottom: 32,
+        },
+      };
+
+    default:
+      return {
+        id: createId(),
+        type,
+        props: {},
+        styles: {},
+      };
   }
 }
 
-function section(
-  children: ComponentNode[],
-  styles: Record<
-    string,
-    unknown
-  > = {}
-) {
-  return n(
-    "section",
-    {},
-    {
-      display: "grid",
-      gridTemplateColumns:
-        "1fr",
-      gap: 24,
-      paddingTop: 56,
-      paddingRight: 40,
-      paddingBottom: 56,
-      paddingLeft: 40,
-      ...styles,
-    },
-    children
-  );
-}
+function normalizeSite(site: Site): Site {
+  const extended = site as Site & {
+    slug?: string;
+  };
 
-const initialSite: Site = {
-  id: "site-1",
-  name: "My Website",
-  slug: "my-website",
-  version: 1,
-  theme: "system",
-  pages: [
-    {
-      id: "home",
-      name: "Home",
-      slug: "/",
-      margins: {
-        top: 0,
-        right: 32,
-        bottom: 0,
-        left: 32,
-      },
-      styles: {
-        background:
-          "var(--sytely-page)",
-      },
-      components: [
-        section(
-          [
-            n(
-              "heading",
-              {
-                text:
-                  "Build websites visually.",
-              },
-              {
-                fontSize: 56,
-                fontWeight: 750,
-                textAlign:
-                  "center",
-                width: "100%",
-              }
-            ),
-            n(
-              "text",
-              {
-                text:
-                  "Create polished responsive websites without fighting the layout.",
-              },
-              {
-                fontSize: 18,
-                textAlign:
-                  "center",
-                maxWidth: 700,
-                justifySelf:
-                  "center",
-              }
-            ),
-            n(
-              "button",
-              {
-                text:
-                  "Get started",
-                linkTo: "#",
-              },
-              {
-                justifySelf:
-                  "center",
-              }
-            ),
-          ],
-          {
-            alignItems:
-              "center",
-          }
-        ),
-        section([
-          makeComponent(
-            "features"
-          ),
-        ]),
-        section([
-          makeComponent(
-            "pricing"
-          ),
-        ]),
-      ],
-    },
-  ],
-};
-
-function normalizeSite(
-  site: Site
-): Site {
   return {
     ...site,
-    slug:
-      site.slug ||
-      slugify(site.name),
+    slug: extended.slug || slugify(site.name),
     pages:
-      site.pages?.length
+      site.pages?.length > 0
         ? site.pages
-        : [
-            {
-              id: uid(),
-              name: "Home",
-              slug: "/",
-              margins: {
-                top: 0,
-                right: 32,
-                bottom: 0,
-                left: 32,
-              },
-              components: [],
-            },
-          ],
+        : [makePage("Home")],
   };
 }
 
-function clone(
-  node: ComponentNode
-): ComponentNode {
+function makePage(name: string): SitePage {
   return {
-    ...node,
-    id: uid(),
-    props: {
-      ...node.props,
+    id: createId(),
+    name,
+    slug: "/",
+    margins: {
+      top: 0,
+      right: 32,
+      bottom: 0,
+      left: 32,
     },
-    styles: node.styles
-      ? {
-          ...node.styles,
-        }
-      : {},
-    children:
-      node.children?.map(
-        clone
-      ),
+    styles: {
+      background: "var(--sytely-page)",
+    },
+    components: [makeNode("section")],
   };
 }
 
-function find(
+function findNode(
   nodes: ComponentNode[],
-  id: string
+  nodeId: string
 ): ComponentNode | null {
   for (const node of nodes) {
-    if (node.id === id) {
+    if (node.id === nodeId) {
       return node;
     }
 
-    const child = find(
+    const found = findNode(
       node.children ?? [],
-      id
+      nodeId
     );
 
-    if (child) {
-      return child;
+    if (found) {
+      return found;
     }
   }
 
   return null;
 }
 
-function parentOf(
+function findParent(
   nodes: ComponentNode[],
-  id: string
+  nodeId: string
 ): ComponentNode | null {
   for (const node of nodes) {
     if (
       (node.children ?? []).some(
-        (child) =>
-          child.id === id
+        (child) => child.id === nodeId
       )
     ) {
       return node;
     }
 
-    const parent =
-      parentOf(
-        node.children ?? [],
-        id
-      );
+    const found = findParent(
+      node.children ?? [],
+      nodeId
+    );
 
-    if (parent) {
-      return parent;
+    if (found) {
+      return found;
     }
   }
 
   return null;
 }
 
-function contains(
-  node: ComponentNode,
-  id: string
-) {
-  return (
-    node.id === id ||
-    (node.children ?? []).some(
-      (child) =>
-        contains(
-          child,
-          id
-        )
-    )
-  );
-}
-
-function mapNodes(
+function mapTree(
   nodes: ComponentNode[],
-  fn: (
+  updater: (
     node: ComponentNode
   ) => ComponentNode
-) {
-  return nodes.map(
-    (node) =>
-      fn({
-        ...node,
-        children:
-          node.children
-            ? mapNodes(
-                node.children,
-                fn
-              )
-            : node.children,
-      })
+): ComponentNode[] {
+  return nodes.map((node) => {
+    const next: ComponentNode = {
+      ...node,
+      children: node.children
+        ? mapTree(node.children, updater)
+        : node.children,
+    };
+
+    return updater(next);
+  });
+}
+
+function replaceNode(
+  nodes: ComponentNode[],
+  nodeId: string,
+  updater: (
+    node: ComponentNode
+  ) => ComponentNode
+): ComponentNode[] {
+  return mapTree(nodes, (node) =>
+    node.id === nodeId
+      ? updater(node)
+      : node
   );
 }
 
-function removeIds(
+function removeNodes(
   nodes: ComponentNode[],
   ids: Set<string>
 ): {
   nodes: ComponentNode[];
   removed: ComponentNode[];
 } {
-  const removed: ComponentNode[] =
-    [];
-
-  const next: ComponentNode[] =
-    [];
+  const next: ComponentNode[] = [];
+  const removed: ComponentNode[] = [];
 
   for (const node of nodes) {
     if (ids.has(node.id)) {
@@ -721,136 +556,90 @@ function removeIds(
       continue;
     }
 
-    const childResult =
-      removeIds(
-        node.children ?? [],
+    if (node.children) {
+      const result = removeNodes(
+        node.children,
         ids
       );
 
-    removed.push(
-      ...childResult.removed
-    );
+      removed.push(...result.removed);
 
-    next.push({
-      ...node,
-      children: node.children
-        ? childResult.nodes
-        : node.children,
-    });
+      next.push({
+        ...node,
+        children: result.nodes,
+      });
+    } else {
+      next.push(node);
+    }
   }
 
-  return {
-    nodes: next,
-    removed,
-  };
+  return { nodes: next, removed };
 }
 
-function insertAt(
+function insertNodes(
   nodes: ComponentNode[],
   parentId: string | null,
-  index: number,
-  items: ComponentNode[]
-) {
+  items: ComponentNode[],
+  index = -1
+): ComponentNode[] {
   if (!parentId) {
-    const next = [
-      ...nodes,
-    ];
+    const result = [...nodes];
 
-    next.splice(
-      Math.max(
-        0,
-        Math.min(
-          index,
-          next.length
-        )
-      ),
-      0,
-      ...items
-    );
+    if (
+      index < 0 ||
+      index > result.length
+    ) {
+      result.push(...items);
+    } else {
+      result.splice(index, 0, ...items);
+    }
 
-    return next;
+    return result;
   }
 
-  return nodes.map(
-    (node) => {
-      if (node.id === parentId) {
-        const children = [
-          ...(node.children ??
-            []),
-        ];
+  return nodes.map((node) => {
+    if (node.id === parentId) {
+      const children = [
+        ...(node.children ?? []),
+      ];
 
+      if (
+        index < 0 ||
+        index > children.length
+      ) {
+        children.push(...items);
+      } else {
         children.splice(
-          Math.max(
-            0,
-            Math.min(
-              index,
-              children.length
-            )
-          ),
+          index,
           0,
           ...items
         );
-
-        return {
-          ...node,
-          children,
-        };
       }
 
-      return node.children
-        ? {
-            ...node,
-            children:
-              insertAt(
-                node.children,
-                parentId,
-                index,
-                items
-              ),
-          }
-        : node;
+      return {
+        ...node,
+        children,
+      };
     }
-  );
+
+    return node.children
+      ? {
+          ...node,
+          children: insertNodes(
+            node.children,
+            parentId,
+            items,
+            index
+          ),
+        }
+      : node;
+  });
 }
 
-function updateOne(
-  nodes: ComponentNode[],
-  id: string,
-  fn: (
-    node: ComponentNode
-  ) => ComponentNode
-) {
-  return mapNodes(
-    nodes,
-    (node) =>
-      node.id === id
-        ? fn(node)
-        : node
-  );
-}
-
-function pageWith(
-  site: Site,
-  pageId: string,
-  fn: (
-    page: SitePage
-  ) => SitePage
-): Site {
-  return {
-    ...site,
-    pages: site.pages.map(
-      (page) =>
-        page.id === pageId
-          ? fn(page)
-          : page
-    ),
-  };
-}
-
-function px(
+function getNumber(
   value: unknown,
   fallback: number
-) {
+): number {
   if (
     typeof value === "number" &&
     Number.isFinite(value)
@@ -858,91 +647,44 @@ function px(
     return value;
   }
 
-  const parsed =
-    Number(value);
+  return fallback;
+}
 
-  return Number.isFinite(
-    parsed
-  )
-    ? parsed
+function getString(
+  value: unknown,
+  fallback = ""
+): string {
+  return typeof value === "string"
+    ? value
     : fallback;
 }
 
-function applyColumns(
-  nodes: ComponentNode[],
-  sectionId: string
+function saveSiteCollection(
+  sites: Site[]
 ) {
-  const sectionNode =
-    find(
-      nodes,
-      sectionId
-    );
-
-  if (
-    !sectionNode ||
-    sectionNode.type !==
-      "section" ||
-    (sectionNode.children
-      ?.length ?? 0) < 2
-  ) {
-    return nodes;
-  }
-
-  const count =
-    Math.max(
-      2,
-      Math.min(
-        6,
-        sectionNode.children
-          ?.length ?? 2
-      )
-    );
-
-  return updateOne(
-    nodes,
-    sectionId,
-    (node) => ({
-      ...node,
-      styles: {
-        ...(node.styles ??
-          {}),
-        display: "grid",
-        gridTemplateColumns: `repeat(${count},minmax(0,1fr))`,
-        gap: px(
-          node.styles?.gap,
-          18
-        ),
-      },
-    })
+  localStorage.setItem(
+    STORAGE_SITES,
+    JSON.stringify(sites)
   );
 }
 
-function findAncestorSection(
-  nodes: ComponentNode[],
-  id: string,
-  current: string | null = null
-): string | null {
-  for (const node of nodes) {
-    if (node.id === id) {
-      return current;
-    }
-
-    const result =
-      findAncestorSection(
-        node.children ?? [],
-        id,
-        node.type ===
-          "section"
-          ? node.id
-          : current
-      );
-
-    if (result) {
-      return result;
-    }
-  }
-
-  return null;
+function SiteName({
+  site,
+  onRename,
+}: {
+  site: Site;
+  onRename: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="editor-site-button"
+      onClick={onRename}
+    >
+      <span>{site.name}</span>
+      <span aria-hidden="true">⌄</span>
+    </button>
+  );
 }
 
 export default function Editor({
@@ -951,37 +693,38 @@ export default function Editor({
   siteSlug: string;
 }) {
   const [site, setSite] =
-    useState<Site | null>(
-      null
-    );
+    useState<Site | null>(null);
 
-  const [pageId, setPageId] =
+  const [activePageId, setActivePageId] =
     useState("");
 
-  const [selected, setSelected] =
+  const [selectedIds, setSelectedIds] =
     useState<string[]>([]);
 
-  const [panel, setPanel] =
-    useState<Panel>(
-      "components"
-    );
+  const [pageSelected, setPageSelected] =
+    useState(true);
 
   const [device, setDevice] =
-    useState<Device>(
-      "desktop"
-    );
+    useState<Device>("desktop");
 
   const [zoom, setZoom] =
     useState(80);
 
-  const [pan, setPan] =
-    useState({
-      x: 0,
-      y: 0,
-    });
+  const [pan, setPan] = useState({
+    x: 0,
+    y: 0,
+  });
 
-  const [panMode, setPanMode] =
-    useState(false);
+  const [panel, setPanel] =
+    useState<
+      "components" |
+      "templates" |
+      "pages" |
+      "layers"
+    >("components");
+
+  const [search, setSearch] =
+    useState("");
 
   const [dirty, setDirty] =
     useState(false);
@@ -995,99 +738,62 @@ export default function Editor({
   const [future, setFuture] =
     useState<Site[]>([]);
 
-  const [search, setSearch] =
-    useState("");
+  const [numericDrafts, setNumericDrafts] =
+    useState<
+      Record<string, string>
+    >({});
 
-  const [drop, setDrop] =
-    useState<DropTarget | null>(
-      null
-    );
+  const [styleClipboard, setStyleClipboard] =
+    useState<Record<
+      string,
+      unknown
+    > | null>(null);
 
-  const [dragging, setDragging] =
-    useState(false);
+  const imageInput =
+    useRef<HTMLInputElement>(null);
 
-  const [
-    numericDraft,
-    setNumericDraft,
-  ] = useState<
-    Record<string, string>
-  >({});
+  const imageTarget =
+    useRef<string | null>(null);
 
-  const [
-    imageTarget,
-    setImageTarget,
-  ] = useState<string | null>(
-    null
-  );
-
-  const [marquee, setMarquee] =
-    useState<{
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-    } | null>(null);
-
-  const fileRef =
-    useRef<HTMLInputElement | null>(
-      null
-    );
-
-  const panningRef =
+  const panStart =
     useRef<{
       x: number;
       y: number;
-      sx: number;
-      sy: number;
+      clientX: number;
+      clientY: number;
     } | null>(null);
 
-  const page = useMemo(
-    () =>
-      site?.pages.find(
-        (item) =>
-          item.id === pageId
+  const currentPage = useMemo(() => {
+    if (!site) {
+      return null;
+    }
+
+    return (
+      site.pages.find(
+        (page) =>
+          page.id === activePageId
       ) ??
-      site?.pages[0] ??
-      null,
-    [site, pageId]
-  );
-
-  const selectedNode =
-    useMemo(
-      () =>
-        page &&
-        selected.length === 1
-          ? find(
-              page.components,
-              selected[0]
-            )
-          : null,
-      [
-        page,
-        selected,
-      ]
+      site.pages[0] ??
+      null
     );
+  }, [site, activePageId]);
 
-  const selectedNodes =
-    useMemo(
-      () =>
-        page
-          ? selected
-              .map((id) =>
-                find(
-                  page.components,
-                  id
-                )
-              )
-              .filter(
-                Boolean
-              ) as ComponentNode[]
-          : [],
-      [
-        page,
-        selected,
-      ]
+  const selectedNode = useMemo(() => {
+    if (
+      !currentPage ||
+      selectedIds.length !== 1
+    ) {
+      return null;
+    }
+
+    return findNode(
+      currentPage.components,
+      selectedIds[0]
     );
+  }, [
+    currentPage,
+    selectedIds,
+  ]);
 
   useEffect(() => {
     try {
@@ -1104,74 +810,79 @@ export default function Editor({
       let sites: Site[] = [];
 
       if (raw) {
-        const parsed: unknown =
+        const parsed =
           JSON.parse(raw);
 
-        if (
-          Array.isArray(parsed)
-        ) {
+        if (Array.isArray(parsed)) {
           sites =
-            parsed.map(
-              (item) =>
-                normalizeSite(
-                  item as Site
-                )
-            );
+            parsed.map(normalizeSite);
         }
       }
 
       if (
-        !sites.length &&
+        sites.length === 0 &&
         legacy
       ) {
-        const parsed: unknown =
-          JSON.parse(legacy);
+        try {
+          const parsed =
+            JSON.parse(legacy);
 
-        if (
-          parsed &&
-          typeof parsed ===
-            "object"
-        ) {
-          sites = [
-            normalizeSite(
-              parsed as Site
-            ),
-          ];
+          if (parsed) {
+            sites = [
+              normalizeSite(parsed),
+            ];
+          }
+        } catch {
+          // Invalid legacy storage.
         }
       }
 
-      if (!sites.length) {
+      if (sites.length === 0) {
         sites = [
-          initialSite,
+          {
+            id: "site-1",
+            name: "My Website",
+            slug: "my-website",
+            version: 1,
+            theme: "system",
+            pages: [
+              makePage("Home"),
+            ],
+          } as Site,
         ];
+
+        saveSiteCollection(sites);
       }
 
-      const wanted =
+      const requested =
         siteSlug.toLowerCase();
 
-      const found =
-        sites.find(
-          (item) =>
-            item.id ===
-              siteSlug ||
-            item.slug?.toLowerCase() ===
-              wanted ||
-            slugify(
-              item.name
-            ) === wanted
-        );
+      const found = sites.find(
+        (candidate) => {
+          const extended =
+            candidate as Site & {
+              slug?: string;
+            };
+
+          return (
+            extended.slug?.toLowerCase() ===
+              requested ||
+            candidate.id.toLowerCase() ===
+              requested ||
+            slugify(candidate.name) ===
+              requested
+          );
+        }
+      );
 
       if (!found) {
-        setStatus(
-          "Website not found"
-        );
+        setStatus("Website not found");
         return;
       }
 
       setSite(found);
-      setPageId(
-        found.pages[0]?.id ??
-          ""
+      setActivePageId(
+        found.pages[0]?.id ?? ""
       );
     } catch {
       setStatus(
@@ -1182,2198 +893,1168 @@ export default function Editor({
 
   const commit = useCallback(
     (
-      fn: (
+      updater: (
         current: Site
       ) => Site
     ) => {
-      setSite(
-        (current) => {
-          if (!current) {
-            return current;
-          }
-
-          setHistory(
-            (items) => [
-              ...items.slice(
-                -39
-              ),
-              current,
-            ]
-          );
-
-          setFuture([]);
-
-          setDirty(true);
-
-          setStatus(
-            "Unsaved changes"
-          );
-
-          return fn(
-            current
-          );
+      setSite((current) => {
+        if (!current) {
+          return current;
         }
-      );
+
+        setHistory((items) => [
+          ...items.slice(-49),
+          current,
+        ]);
+
+        setFuture([]);
+        setDirty(true);
+        setStatus("Unsaved changes");
+
+        return updater(current);
+      });
     },
     []
   );
 
-  const updatePage =
-    useCallback(
-      (
-        fn: (
-          page: SitePage
-        ) => SitePage
-      ) => {
-        commit((current) =>
-          pageWith(
+  const updatePage = useCallback(
+    (
+      updater: (
+        page: SitePage
+      ) => SitePage
+    ) => {
+      commit((current) => ({
+        ...current,
+        pages: current.pages.map(
+          (page) =>
+            page.id === activePageId
+              ? updater(page)
+              : page
+        ),
+      }));
+    },
+    [activePageId, commit]
+  );
+
+  const updateNode = useCallback(
+    (
+      nodeId: string,
+      updater: (
+        node: ComponentNode
+      ) => ComponentNode
+    ) => {
+      updatePage((page) => ({
+        ...page,
+        components: replaceNode(
+          page.components,
+          nodeId,
+          updater
+        ),
+      }));
+    },
+    [updatePage]
+  );
+
+  const updateProp = useCallback(
+    (
+      nodeId: string,
+      key: string,
+      value: unknown
+    ) => {
+      updateNode(nodeId, (node) => ({
+        ...node,
+        props: {
+          ...node.props,
+          [key]: value,
+        },
+      }));
+    },
+    [updateNode]
+  );
+
+  const updateStyle = useCallback(
+    (
+      nodeId: string,
+      key: string,
+      value: unknown
+    ) => {
+      updateNode(nodeId, (node) => ({
+        ...node,
+        styles: {
+          ...(node.styles ?? {}),
+          [key]: value,
+        },
+      }));
+    },
+    [updateNode]
+  );
+
+  const save = useCallback(() => {
+    if (!site) {
+      return;
+    }
+
+    try {
+      const sitesRaw =
+        localStorage.getItem(
+          STORAGE_SITES
+        );
+
+      let sites: Site[] = [];
+
+      if (sitesRaw) {
+        const parsed =
+          JSON.parse(sitesRaw);
+
+        if (Array.isArray(parsed)) {
+          sites = parsed;
+        }
+      }
+
+      const index =
+        sites.findIndex(
+          (item) =>
+            item.id === site.id
+        );
+
+      if (index >= 0) {
+        sites[index] = site;
+      } else {
+        sites.push(site);
+      }
+
+      saveSiteCollection(sites);
+      localStorage.setItem(
+        STORAGE_LEGACY,
+        JSON.stringify(site)
+      );
+
+      setDirty(false);
+      setStatus("Saved");
+    } catch {
+      setStatus("Could not save");
+    }
+  }, [site]);
+
+  const undo = useCallback(() => {
+    setHistory((items) => {
+      const previous =
+        items[items.length - 1];
+
+      if (!previous) {
+        return items;
+      }
+
+      setSite((current) => {
+        if (current) {
+          setFuture((items2) => [
+            ...items2,
             current,
-            pageId,
-            fn
-          )
-        );
-      },
-      [
-        commit,
-        pageId,
-      ]
-    );
+          ]);
+        }
 
-  const updateNode =
-    useCallback(
-      (
-        id: string,
-        fn: (
-          node: ComponentNode
-        ) => ComponentNode
-      ) => {
-        updatePage(
-          (current) => ({
-            ...current,
-            components:
-              updateOne(
-                current.components,
-                id,
-                fn
-              ),
-          })
-        );
-      },
-      [updatePage]
-    );
+        return previous;
+      });
 
-  const save = useCallback(
-    () => {
-      if (!site) return;
+      setDirty(true);
+      setStatus("Unsaved changes");
 
-      try {
-        const raw =
-          localStorage.getItem(
-            STORAGE_SITES
+      return items.slice(0, -1);
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setFuture((items) => {
+      const next =
+        items[items.length - 1];
+
+      if (!next) {
+        return items;
+      }
+
+      setSite((current) => {
+        if (current) {
+          setHistory((items2) => [
+            ...items2,
+            current,
+          ]);
+        }
+
+        return next;
+      });
+
+      setDirty(true);
+      setStatus("Unsaved changes");
+
+      return items.slice(0, -1);
+    });
+  }, []);
+
+  const renameSite = useCallback(() => {
+    if (!site) {
+      return;
+    }
+
+    const name =
+      window.prompt(
+        "Website name",
+        site.name
+      );
+
+    if (!name?.trim()) {
+      return;
+    }
+
+    commit((current) => ({
+      ...current,
+      name: name.trim(),
+      slug:
+        (
+          current as Site & {
+            slug?: string;
+          }
+        ).slug ||
+        slugify(name),
+    }));
+  }, [site, commit]);
+
+  const selectNode = useCallback(
+    (
+      nodeId: string,
+      additive: boolean
+    ) => {
+      setPageSelected(false);
+
+      setSelectedIds((current) => {
+        if (!additive) {
+          return [nodeId];
+        }
+
+        if (current.includes(nodeId)) {
+          return current.filter(
+            (item) =>
+              item !== nodeId
           );
+        }
 
-        const parsed: unknown =
-          raw
-            ? JSON.parse(raw)
-            : [];
+        return [
+          ...current,
+          nodeId,
+        ];
+      });
+    },
+    []
+  );
 
-        const sites: Site[] =
-          Array.isArray(parsed)
-            ? (parsed as Site[])
-            : [];
+  const addComponent = useCallback(
+    (type: ComponentType) => {
+      const node = makeNode(type);
+
+      updatePage((page) => ({
+        ...page,
+        components: [
+          ...page.components,
+          node,
+        ],
+      }));
+
+      setSelectedIds([node.id]);
+      setPageSelected(false);
+    },
+    [updatePage]
+  );
+
+  const addColumnBeside = useCallback(
+    (
+      targetId: string,
+      type: ComponentType
+    ) => {
+      if (!currentPage) {
+        return;
+      }
+
+      const target =
+        findNode(
+          currentPage.components,
+          targetId
+        );
+
+      if (!target) {
+        return;
+      }
+
+      const parent =
+        findParent(
+          currentPage.components,
+          targetId
+        );
+
+      const column =
+        makeNode(type);
+
+      if (parent) {
+        const children = [
+          ...(parent.children ?? []),
+        ];
 
         const index =
-          sites.findIndex(
-            (item) =>
-              item.id ===
-              site.id
+          children.findIndex(
+            (child) =>
+              child.id === targetId
           );
 
-        if (index >= 0) {
-          sites[index] =
-            site;
-        } else {
-          sites.push(site);
-        }
-
-        localStorage.setItem(
-          STORAGE_SITES,
-          JSON.stringify(
-            sites
-          )
-        );
-
-        localStorage.setItem(
-          STORAGE_LEGACY,
-          JSON.stringify(
-            site
-          )
-        );
-
-        setDirty(false);
-        setStatus("Saved");
-      } catch {
-        setStatus(
-          "Could not save"
-        );
-      }
-    },
-    [site]
-  );
-
-  const undo = useCallback(
-    () => {
-      setHistory(
-        (items) => {
-          const previous =
-            items.at(-1);
-
-          if (!previous) {
-            return items;
-          }
-
-          setSite(
-            (current) =>
-              current
-                ? (setFuture(
-                    (futureItems) =>
-                      [
-                        ...futureItems,
-                        current,
-                      ]
-                  ),
-                  previous)
-                : current
-          );
-
-          setDirty(true);
-          setStatus(
-            "Unsaved changes"
-          );
-
-          return items.slice(
-            0,
-            -1
-          );
-        }
-      );
-    },
-    []
-  );
-
-  const redo = useCallback(
-    () => {
-      setFuture(
-        (items) => {
-          const next =
-            items.at(-1);
-
-          if (!next) {
-            return items;
-          }
-
-          setSite(
-            (current) =>
-              current
-                ? (setHistory(
-                    (historyItems) =>
-                      [
-                        ...historyItems,
-                        current,
-                      ]
-                  ),
-                  next)
-                : current
-          );
-
-          setDirty(true);
-          setStatus(
-            "Unsaved changes"
-          );
-
-          return items.slice(
-            0,
-            -1
-          );
-        }
-      );
-    },
-    []
-  );
-
-  const selectNode =
-    useCallback(
-      (
-        id: string,
-        event: ReactMouseEvent
-      ) => {
-        event.stopPropagation();
-
-        const additive =
-          event.metaKey ||
-          event.ctrlKey ||
-          event.shiftKey;
-
-        setSelected(
-          (current) =>
-            additive
-              ? current.includes(id)
-                ? current.filter(
-                    (item) =>
-                      item !== id
-                  )
-                : [
-                    ...current,
-                    id,
-                  ]
-              : [id]
-        );
-      },
-      []
-    );
-
-  const addComponent =
-    useCallback(
-      (
-        type: ComponentType,
-        target:
-          | DropTarget
-          | null = null
-      ) => {
-        const item =
-          makeComponent(
-            type
-          );
-
-        updatePage(
-          (current) => {
-            let components =
-              target
-                ? insertAt(
-                    current.components,
-                    target.parentId,
-                    target.index,
-                    [item]
-                  )
-                : [
-                    ...current.components,
-                    item,
-                  ];
-
-            if (
-              target?.sectionId &&
-              target.position !==
-                "inside"
-            ) {
-              components =
-                applyColumns(
-                  components,
-                  target.sectionId
-                );
-            }
-
-            return {
-              ...current,
-              components,
-            };
-          }
-        );
-
-        setSelected([
-          item.id,
-        ]);
-      },
-      [updatePage]
-    );
-
-  const addTemplate =
-    useCallback(
-      (
-        template: ComponentNode
-      ) => {
-        const fresh =
-          clone(template);
-
-        updatePage(
-          (current) => ({
-            ...current,
-            components: [
-              ...current.components,
-              fresh,
-            ],
+        updateNode(
+          parent.id,
+          (node) => ({
+            ...node,
+            styles: {
+              ...(node.styles ?? {}),
+              display: "grid",
+              gridTemplateColumns:
+                `repeat(${Math.max(
+                  2,
+                  children.length + 1
+                )},minmax(0,1fr))`,
+            },
+            children: insertAt(
+              children,
+              column,
+              index + 1
+            ),
           })
         );
+      } else {
+        const components = [
+          ...currentPage.components,
+        ];
 
-        setSelected([
-          fresh.id,
-        ]);
-      },
-      [updatePage]
-    );
+        const index =
+          components.findIndex(
+            (item) =>
+              item.id === targetId
+          );
 
-  const duplicate =
+        updatePage((page) => ({
+          ...page,
+          components: insertAt(
+            components,
+            column,
+            index + 1
+          ),
+        }));
+      }
+
+      setSelectedIds([column.id]);
+      setPageSelected(false);
+    },
+    [
+      currentPage,
+      updateNode,
+      updatePage,
+    ]
+  );
+
+  const duplicateSelected =
     useCallback(() => {
       if (
-        !page ||
-        !selected.length
+        !currentPage ||
+        selectedIds.length === 0
       ) {
         return;
       }
 
-      const clones =
-        selectedNodes.map(
-          clone
-        );
+      const clones: ComponentNode[] =
+        [];
+
+      for (const nodeId of selectedIds) {
+        const node =
+          findNode(
+            currentPage.components,
+            nodeId
+          );
+
+        if (node) {
+          clones.push(
+            cloneNode(node)
+          );
+        }
+      }
+
+      if (!clones.length) {
+        return;
+      }
+
+      const first =
+        selectedIds[0];
 
       const parent =
-        selectedNodes[0]
-          ? parentOf(
-              page.components,
-              selectedNodes[0]
-                .id
-            )
-          : null;
+        findParent(
+          currentPage.components,
+          first
+        );
 
       const siblings =
         parent?.children ??
-        page.components;
+        currentPage.components;
 
-      const lastIndex =
-        Math.max(
-          ...selectedNodes.map(
-            (node) =>
-              siblings.findIndex(
-                (item) =>
-                  item.id ===
-                  node.id
-              )
-          )
+      const index =
+        siblings.findIndex(
+          (node) =>
+            node.id === first
         );
 
-      updatePage(
-        (current) => ({
-          ...current,
-          components:
-            insertAt(
-              current.components,
-              parent?.id ??
-                null,
-              lastIndex + 1,
-              clones
-            ),
-        })
-      );
+      updatePage((page) => ({
+        ...page,
+        components: insertNodes(
+          page.components,
+          parent?.id ?? null,
+          clones,
+          index + 1
+        ),
+      }));
 
-      setSelected(
+      setSelectedIds(
         clones.map(
-          (item) =>
-            item.id
+          (node) => node.id
         )
       );
     }, [
-      page,
-      selected,
-      selectedNodes,
+      currentPage,
+      selectedIds,
       updatePage,
     ]);
 
-  const removeSelected =
+  const deleteSelected =
     useCallback(() => {
-      if (!selected.length) {
+      if (
+        !currentPage ||
+        !selectedIds.length
+      ) {
         return;
       }
 
       const ids =
-        new Set<string>(
-          selected
-        );
+        new Set(selectedIds);
 
-      updatePage(
-        (current) => ({
-          ...current,
-          components:
-            removeIds(
-              current.components,
-              ids
-            ).nodes,
-        })
-      );
+      updatePage((page) => ({
+        ...page,
+        components:
+          removeNodes(
+            page.components,
+            ids
+          ).nodes,
+      }));
 
-      setSelected([]);
+      setSelectedIds([]);
+      setPageSelected(true);
     }, [
-      selected,
+      currentPage,
+      selectedIds,
       updatePage,
     ]);
 
-  const move =
+  const moveSelected =
     useCallback(
-      (
-        direction: -1 | 1
-      ) => {
+      (direction: -1 | 1) => {
         if (
-          !page ||
-          selected.length !==
-            1
+          !currentPage ||
+          selectedIds.length !== 1
         ) {
           return;
         }
 
         const targetId =
-          selected[0];
+          selectedIds[0];
 
         const parent =
-          parentOf(
-            page.components,
+          findParent(
+            currentPage.components,
             targetId
           );
 
         const siblings =
           parent?.children ??
-          page.components;
+          currentPage.components;
 
         const index =
           siblings.findIndex(
-            (item) =>
-              item.id ===
-              targetId
+            (node) =>
+              node.id === targetId
           );
 
-        const nextIndex =
+        const target =
           index + direction;
 
         if (
           index < 0 ||
-          nextIndex < 0 ||
-          nextIndex >=
-            siblings.length
+          target < 0 ||
+          target >= siblings.length
         ) {
           return;
         }
 
-        const reordered =
-          [
-            ...siblings,
-          ];
+        const next = [
+          ...siblings,
+        ];
 
-        const [item] =
-          reordered.splice(
-            index,
-            1
-          );
+        const [
+          item,
+        ] = next.splice(
+          index,
+          1
+        );
 
-        reordered.splice(
-          nextIndex,
+        next.splice(
+          target,
           0,
           item
         );
 
-        updatePage(
-          (current) =>
-            parent
-              ? {
-                  ...current,
-                  components:
-                    updateOne(
-                      current.components,
-                      parent.id,
-                      (
-                        node
-                      ) => ({
-                        ...node,
-                        children:
-                          reordered,
-                      })
-                    ),
-                }
-              : {
-                  ...current,
-                  components:
-                    reordered,
-                }
-        );
+        updatePage((page) => {
+          if (parent) {
+            return {
+              ...page,
+              components:
+                replaceNode(
+                  page.components,
+                  parent.id,
+                  (node) => ({
+                    ...node,
+                    children:
+                      next,
+                  })
+                ),
+            };
+          }
+
+          return {
+            ...page,
+            components: next,
+          };
+        });
       },
       [
-        page,
-        selected,
+        currentPage,
+        selectedIds,
         updatePage,
       ]
     );
 
-  const group =
+  const groupSelected =
     useCallback(() => {
       if (
-        !page ||
-        selected.length < 2
+        !currentPage ||
+        selectedIds.length < 2
       ) {
         return;
       }
 
-      const parent =
-        parentOf(
-          page.components,
-          selected[0]
+      const selected =
+        new Set(selectedIds);
+
+      const result =
+        removeNodes(
+          currentPage.components,
+          selected
         );
 
-      const siblings =
-        parent?.children ??
-        page.components;
-
-      const chosen =
-        siblings.filter(
-          (item) =>
-            selected.includes(
-              item.id
-            )
-        );
-
-      const first =
-        siblings.findIndex(
-          (item) =>
-            item.id ===
-            chosen[0]?.id
-        );
-
-      if (!chosen.length) {
+      if (
+        result.removed.length <
+        2
+      ) {
         return;
       }
 
-      const groupNode =
-        section(
-          chosen,
-          {
-            display: "grid",
-            gridTemplateColumns: `repeat(${Math.max(
-              1,
-              chosen.length
-            )},minmax(0,1fr))`,
-            gap: 18,
-          }
-        );
+      const group: ComponentNode = {
+        id: createId(),
+        type: "section",
+        props: {},
+        styles: {
+          display: "grid",
+          gridTemplateColumns:
+            `repeat(${result.removed.length},minmax(0,1fr))`,
+          gap: 20,
+          width: "100%",
+        },
+        children:
+          result.removed,
+      };
 
-      const ids =
-        new Set<string>(
-          chosen.map(
-            (item) =>
-              item.id
-          )
-        );
+      updatePage((page) => ({
+        ...page,
+        components: [
+          ...result.nodes,
+          group,
+        ],
+      }));
 
-      updatePage(
-        (current) => {
-          const without =
-            removeIds(
-              current.components,
-              ids
-            ).nodes;
-
-          return {
-            ...current,
-            components:
-              insertAt(
-                without,
-                parent?.id ??
-                  null,
-                first,
-                [groupNode]
-              ),
-          };
-        }
-      );
-
-      setSelected([
-        groupNode.id,
+      setSelectedIds([
+        group.id,
       ]);
     }, [
-      page,
-      selected,
+      currentPage,
+      selectedIds,
       updatePage,
     ]);
 
-  const ungroup =
+  const ungroupSelected =
     useCallback(() => {
       if (
-        !page ||
-        selected.length !==
-          1
+        !currentPage ||
+        selectedIds.length !== 1
       ) {
         return;
       }
 
-      const target =
-        find(
-          page.components,
-          selected[0]
+      const node =
+        findNode(
+          currentPage.components,
+          selectedIds[0]
         );
 
       if (
-        !target?.children
-          ?.length
+        !node ||
+        !node.children?.length
       ) {
         return;
       }
 
       const parent =
-        parentOf(
-          page.components,
-          target.id
+        findParent(
+          currentPage.components,
+          node.id
         );
 
-      const siblings =
-        parent?.children ??
-        page.components;
+      const children =
+        node.children;
 
-      const index =
-        siblings.findIndex(
-          (item) =>
-            item.id ===
-            target.id
+      if (parent) {
+        updateNode(
+          parent.id,
+          (parentNode) => ({
+            ...parentNode,
+            children:
+              insertAfterId(
+                parentNode.children ??
+                  [],
+                node.id,
+                children
+              ),
+          })
         );
 
-      updatePage(
-        (current) => {
-          const removed =
-            removeIds(
-              current.components,
-              new Set<string>([
-                target.id,
+        updatePage((page) => ({
+          ...page,
+          components:
+            removeNodes(
+              page.components,
+              new Set([
+                node.id,
               ])
-            ).nodes;
+            ).nodes,
+        }));
+      } else {
+        updatePage((page) => {
+          const index =
+            page.components.findIndex(
+              (item) =>
+                item.id === node.id
+            );
+
+          const next =
+            page.components.filter(
+              (item) =>
+                item.id !== node.id
+            );
+
+          next.splice(
+            index,
+            0,
+            ...children
+          );
 
           return {
-            ...current,
-            components:
-              insertAt(
-                removed,
-                parent?.id ??
-                  null,
-                index,
-                target.children ??
-                  []
-              ),
+            ...page,
+            components: next,
           };
-        }
-      );
+        });
+      }
 
-      setSelected(
-        target.children.map(
-          (item) =>
-            item.id
+      setSelectedIds(
+        children.map(
+          (child) => child.id
         )
       );
     }, [
-      page,
-      selected,
+      currentPage,
+      selectedIds,
+      updateNode,
       updatePage,
     ]);
 
-  const renameSite =
-    useCallback(() => {
-      if (!site) {
+  const addPage = useCallback(() => {
+    const page =
+      makePage(
+        `Page ${
+          (site?.pages.length ??
+            0) + 1
+        }`
+      );
+
+    page.slug =
+      `/${slugify(page.name)}`;
+
+    commit((current) => ({
+      ...current,
+      pages: [
+        ...current.pages,
+        page,
+      ],
+    }));
+
+    setActivePageId(page.id);
+    setSelectedIds([]);
+    setPageSelected(true);
+  }, [site, commit]);
+
+  const renamePage = useCallback(
+    (pageId: string) => {
+      const page =
+        site?.pages.find(
+          (item) =>
+            item.id === pageId
+        );
+
+      if (!page) {
         return;
       }
 
       const name =
         window.prompt(
-          "Website name",
-          site.name
+          "Page name",
+          page.name
         );
 
       if (!name?.trim()) {
         return;
       }
 
-      commit(
-        (current) => ({
-          ...current,
-          name:
-            name.trim(),
-          slug:
-            current.slug ||
-            slugify(name),
-        })
-      );
-    }, [
+      commit((current) => ({
+        ...current,
+        pages: current.pages.map(
+          (item) =>
+            item.id === pageId
+              ? {
+                  ...item,
+                  name:
+                    name.trim(),
+                  slug:
+                    pageId ===
+                    current.pages[0]
+                      ?.id
+                      ? "/"
+                      : `/${slugify(
+                          name
+                        )}`,
+                }
+              : item
+        ),
+      }));
+    },
+    [site, commit]
+  );
+
+  const deletePage = useCallback(
+    (pageId: string) => {
+      if (
+        !site ||
+        site.pages.length <= 1
+      ) {
+        return;
+      }
+
+      if (
+        !window.confirm(
+          "Delete this page?"
+        )
+      ) {
+        return;
+      }
+
+      const remaining =
+        site.pages.filter(
+          (page) =>
+            page.id !== pageId
+        );
+
+      commit((current) => ({
+        ...current,
+        pages: remaining,
+      }));
+
+      if (
+        activePageId === pageId
+      ) {
+        setActivePageId(
+          remaining[0]?.id ?? ""
+        );
+        setSelectedIds([]);
+        setPageSelected(true);
+      }
+    },
+    [
       site,
+      activePageId,
       commit,
-    ]);
+    ]
+  );
 
-  const addPage =
-    useCallback(() => {
-      const name = `Page ${
-        (site?.pages.length ??
-          0) + 1
-      }`;
-
-      const newPage: SitePage =
-        {
-          id: uid(),
-          name,
-          slug: `/${slugify(
-            name
-          )}`,
-          margins: {
-            top: 0,
-            right: 32,
-            bottom: 0,
-            left: 32,
-          },
-          components: [],
-        };
-
-      commit(
-        (current) => ({
-          ...current,
-          pages: [
-            ...current.pages,
-            newPage,
-          ],
-        })
-      );
-
-      setPageId(
-        newPage.id
-      );
-
-      setSelected([]);
-    }, [
-      site,
-      commit,
-    ]);
-
-  const renamePage =
+  const beginImageUpload =
     useCallback(
-      (targetId: string) => {
-        const target =
-          site?.pages.find(
-            (item) =>
-              item.id ===
-              targetId
-          );
-
-        if (!target) {
-          return;
-        }
-
-        const name =
-          window.prompt(
-            "Page name",
-            target.name
-          );
-
-        if (!name?.trim()) {
-          return;
-        }
-
-        commit(
-          (current) => ({
-            ...current,
-            pages:
-              current.pages.map(
-                (item) =>
-                  item.id ===
-                  targetId
-                    ? {
-                        ...item,
-                        name:
-                          name.trim(),
-                        slug:
-                          targetId ===
-                          current
-                            .pages[0]
-                            ?.id
-                            ? "/"
-                            : `/${slugify(
-                                name
-                              )}`,
-                      }
-                    : item
-              ),
-          })
-        );
-      },
-      [site, commit]
-    );
-
-  const deletePage =
-    useCallback(
-      (targetId: string) => {
-        if (
-          !site ||
-          site.pages.length <=
-            1
-        ) {
-          return;
-        }
-
-        if (
-          !window.confirm(
-            "Delete this page?"
-          )
-        ) {
-          return;
-        }
-
-        const next =
-          site.pages.find(
-            (item) =>
-              item.id !==
-              targetId
-          );
-
-        commit(
-          (current) => ({
-            ...current,
-            pages:
-              current.pages.filter(
-                (item) =>
-                  item.id !==
-                  targetId
-              ),
-          })
-        );
-
-        if (
-          pageId === targetId
-        ) {
-          setPageId(
-            next?.id ?? ""
-          );
-        }
-
-        setSelected([]);
-      },
-      [
-        site,
-        pageId,
-        commit,
-      ]
-    );
-
-  const parseDrag =
-    useCallback(
-      (
-        event: DragEvent
-      ): DragPayload | null => {
-        try {
-          const raw =
-            event.dataTransfer.getData(
-              "application/x-sytely"
-            );
-
-          return raw
-            ? (JSON.parse(
-                raw
-              ) as DragPayload)
-            : null;
-        } catch {
-          return null;
-        }
+      (nodeId: string) => {
+        imageTarget.current =
+          nodeId;
+        imageInput.current?.click();
       },
       []
     );
 
-  const calculateDrop =
-    useCallback(
-      (
-        event: DragEvent
-      ): DropTarget | null => {
-        if (!page) {
-          return null;
-        }
-
-        const targetElement =
-          (
-            event.target as HTMLElement
-          ).closest(
-            "[data-sytely-id]"
-          ) as HTMLElement | null;
-
-        if (!targetElement) {
-          return {
-            id: null,
-            parentId: null,
-            index:
-              page.components
-                .length,
-            position:
-              "after",
-            sectionId: null,
-          };
-        }
-
-        const targetId =
-          targetElement.dataset
-            .sytelyId ??
-          null;
-
-        if (!targetId) {
-          return null;
-        }
-
-        const target =
-          find(
-            page.components,
-            targetId
-          );
-
-        if (!target) {
-          return null;
-        }
-
-        const rect =
-          targetElement.getBoundingClientRect();
-
-        const x =
-          event.clientX -
-          rect.left;
-
-        const y =
-          event.clientY -
-          rect.top;
-
-        const horizontal =
-          rect.width >
-          rect.height * 1.25;
-
-        const canContain = [
-          "section",
-          "card",
-          "features",
-          "pricing",
-          "footer",
-        ].includes(
-          target.type
-        );
-
-        const inside =
-          canContain &&
-          x >
-            rect.width *
-              0.18 &&
-          x <
-            rect.width *
-              0.82 &&
-          y >
-            rect.height *
-              0.18 &&
-          y <
-            rect.height *
-              0.82;
-
-        if (inside) {
-          return {
-            id: targetId,
-            parentId:
-              targetId,
-            index:
-              target.children
-                ?.length ?? 0,
-            position:
-              "inside",
-            sectionId:
-              target.type ===
-              "section"
-                ? targetId
-                : findAncestorSection(
-                    page.components,
-                    target.id
-                  ),
-          };
-        }
-
-        const parent =
-          parentOf(
-            page.components,
-            targetId
-          );
-
-        const siblings =
-          parent?.children ??
-          page.components;
-
-        const index =
-          siblings.findIndex(
-            (item) =>
-              item.id ===
-              targetId
-          );
-
-        const after =
-          horizontal
-            ? x >
-              rect.width / 2
-            : y >
-              rect.height / 2;
-
-        const sectionId =
-          parent?.type ===
-          "section"
-            ? parent.id
-            : parent
-              ? findAncestorSection(
-                  page.components,
-                  parent.id
-                )
-              : null;
-
-        return {
-          id: targetId,
-          parentId:
-            parent?.id ?? null,
-          index:
-            index +
-            (after ? 1 : 0),
-          position:
-            after
-              ? "after"
-              : "before",
-          sectionId,
-        };
-      },
-      [page]
-    );
-
-  const onDragOver =
-    useCallback(
-      (event: DragEvent) => {
-        event.preventDefault();
-
-        setDrop(
-          calculateDrop(
-            event
-          )
-        );
-      },
-      [calculateDrop]
-    );
-
-  const performDrop =
-    useCallback(
-      (event: DragEvent) => {
-        event.preventDefault();
-
-        const payload =
-          parseDrag(event);
-
-        const target =
-          calculateDrop(event);
-
-        setDrop(null);
-        setDragging(false);
-
-        if (
-          !payload ||
-          !target ||
-          !page
-        ) {
-          return;
-        }
-
-        if (
-          payload.kind ===
-          "component"
-        ) {
-          const item =
-            makeComponent(
-              payload.type
-            );
-
-          updatePage(
-            (current) => {
-              let components =
-                insertAt(
-                  current.components,
-                  target.parentId,
-                  target.index,
-                  [item]
-                );
-
-              if (
-                target.sectionId &&
-                target.position !==
-                  "inside"
-              ) {
-                components =
-                  applyColumns(
-                    components,
-                    target.sectionId
-                  );
-              }
-
-              return {
-                ...current,
-                components,
-              };
-            }
-          );
-
-          setSelected([
-            item.id,
-          ]);
-
-          return;
-        }
-
-        if (
-          payload.kind ===
-          "template"
-        ) {
-          addTemplate(
-            payload.node
-          );
-
-          return;
-        }
-
-        const sourceIds =
-          payload.ids;
-
-        if (
-          !sourceIds.length
-        ) {
-          return;
-        }
-
-        const sourceNodes =
-          sourceIds
-            .map((id) =>
-              find(
-                page.components,
-                id
-              )
-            )
-            .filter(
-              Boolean
-            ) as ComponentNode[];
-
-        if (
-          !sourceNodes.length
-        ) {
-          return;
-        }
-
-        if (
-          sourceNodes.some(
-            (source) =>
-              target.id ===
-                source.id ||
-              contains(
-                source,
-                target.id ??
-                  ""
-              )
-          )
-        ) {
-          return;
-        }
-
-        const ids =
-          new Set<string>(
-            sourceIds
-          );
-
-        const result =
-          removeIds(
-            page.components,
-            ids
-          );
-
-        let index =
-          target.index;
-
-        const oldParent =
-          parentOf(
-            page.components,
-            sourceNodes[0]
-              .id
-          );
-
-        const oldSiblings =
-          oldParent?.children ??
-          page.components;
-
-        const beforeTargetIndex =
-          target.id
-            ? oldSiblings.findIndex(
-                (item) =>
-                  item.id ===
-                  target.id
-              )
-            : -1;
-
-        if (
-          oldParent?.id ===
-            target.parentId &&
-          beforeTargetIndex >=
-            0 &&
-          beforeTargetIndex <
-            target.index
-        ) {
-          index -=
-            sourceNodes.length;
-        }
-
-        updatePage(
-          (current) => {
-            let components =
-              insertAt(
-                result.nodes,
-                target.parentId,
-                index,
-                sourceNodes
-              );
-
-            if (
-              target.sectionId &&
-              target.position !==
-                "inside"
-            ) {
-              components =
-                applyColumns(
-                  components,
-                  target.sectionId
-                );
-            }
-
-            return {
-              ...current,
-              components,
-            };
-          }
-        );
-
-        setSelected(
-          sourceNodes.map(
-            (node) =>
-              node.id
-          )
-        );
-      },
-      [
-        parseDrag,
-        calculateDrop,
-        page,
-        updatePage,
-        addTemplate,
-      ]
-    );
-
-  const onDragStart =
-    useCallback(
-      (
-        event: DragEvent<HTMLElement>,
-        nodeId: string
-      ) => {
-        const ids =
-          selected.includes(
-            nodeId
-          )
-            ? selected
-            : [nodeId];
-
-        event.dataTransfer.effectAllowed =
-          "move";
-
-        event.dataTransfer.setData(
-          "application/x-sytely",
-          JSON.stringify({
-            kind: "node",
-            ids,
-          } satisfies DragPayload)
-        );
-
-        setDragging(true);
-      },
-      [selected]
-    );
-
-  const paletteDrag =
-    useCallback(
-      (
-        event: DragEvent<HTMLElement>,
-        type: ComponentType
-      ) => {
-        event.dataTransfer.effectAllowed =
-          "copy";
-
-        event.dataTransfer.setData(
-          "application/x-sytely",
-          JSON.stringify({
-            kind: "component",
-            type,
-          } satisfies DragPayload)
-        );
-
-        setDragging(true);
-      },
-      []
-    );
-
-  const templateDrag =
-    useCallback(
-      (
-        event: DragEvent<HTMLElement>,
-        template: ComponentNode
-      ) => {
-        event.dataTransfer.effectAllowed =
-          "copy";
-
-        event.dataTransfer.setData(
-          "application/x-sytely",
-          JSON.stringify({
-            kind: "template",
-            node: clone(
-              template
-            ),
-          } satisfies DragPayload)
-        );
-
-        setDragging(true);
-      },
-      []
-    );
-
-  const onImageUpload =
+  const handleImageUpload =
     useCallback(
       (
         event: ChangeEvent<HTMLInputElement>
       ) => {
-        const files =
-          Array.from(
-            event.target.files ??
-              []
-          ) as File[];
+        const file =
+          event.target.files?.[0];
 
-        event.target.value =
-          "";
+        event.target.value = "";
 
-        const id =
-          imageTarget;
+        const target =
+          imageTarget.current;
 
-        setImageTarget(
-          null
-        );
+        imageTarget.current = null;
 
         if (
-          !id ||
-          !files.length
-        ) {
-          return;
-        }
-
-        const node =
-          page
-            ? find(
-                page.components,
-                id
-              )
-            : null;
-
-        const images =
-          files.filter(
-            (file) =>
-              file.type.startsWith(
-                "image/"
-              )
-          );
-
-        if (
-          !node ||
-          !images.length
-        ) {
-          return;
-        }
-
-        Promise.all(
-          images.map(
-            (file) =>
-              new Promise<string>(
-                (
-                  resolve
-                ) => {
-                  const reader =
-                    new FileReader();
-
-                  reader.onload =
-                    () =>
-                      resolve(
-                        typeof reader.result ===
-                          "string"
-                          ? reader.result
-                          : ""
-                      );
-
-                  reader.onerror =
-                    () =>
-                      resolve(
-                        ""
-                      );
-
-                  reader.readAsDataURL(
-                    file
-                  );
-                }
-              )
+          !file ||
+          !target ||
+          !file.type.startsWith(
+            "image/"
           )
-        ).then(
-          (results) => {
-            const usable =
-              results.filter(
-                Boolean
-              );
+        ) {
+          return;
+        }
 
-            if (
-              !usable.length
-            ) {
-              return;
-            }
+        const reader =
+          new FileReader();
 
-            if (
-              node.type ===
-              "gallery"
-            ) {
-              const existing =
-                Array.isArray(
-                  node.props
-                    .images
-                )
-                  ? node.props.images.filter(
-                      (
-                        value
-                      ): value is string =>
-                        typeof value ===
-                        "string"
-                    )
-                  : [];
-
-              updateNode(
-                id,
-                (current) => ({
-                  ...current,
-                  props: {
-                    ...current.props,
-                    images: [
-                      ...existing,
-                      ...usable,
-                    ],
-                  },
-                })
-              );
-            } else {
-              updateNode(
-                id,
-                (current) => ({
-                  ...current,
-                  props: {
-                    ...current.props,
-                    src:
-                      usable[0],
-                  },
-                })
-              );
-            }
+        reader.onload = () => {
+          if (
+            typeof reader.result ===
+            "string"
+          ) {
+            updateProp(
+              target,
+              "src",
+              reader.result
+            );
           }
-        );
+        };
+
+        reader.readAsDataURL(file);
       },
-      [
-        imageTarget,
-        page,
-        updateNode,
-      ]
+      [updateProp]
     );
 
-  const updateProp =
+  const copyStyle = useCallback(() => {
+    if (selectedNode) {
+      setStyleClipboard({
+        ...(selectedNode.styles ??
+          {}),
+      });
+    }
+  }, [selectedNode]);
+
+  const pasteStyle = useCallback(() => {
+    if (
+      selectedNode &&
+      styleClipboard
+    ) {
+      updateNode(
+        selectedNode.id,
+        (node) => ({
+          ...node,
+          styles: {
+            ...styleClipboard,
+          },
+        })
+      );
+    }
+  }, [
+    selectedNode,
+    styleClipboard,
+    updateNode,
+  ]);
+
+  const beginPan =
     useCallback(
       (
-        key: string,
-        value: unknown
+        event: ReactMouseEvent
       ) => {
         if (
-          !selectedNode
+          event.button !== 1 &&
+          !event.altKey
         ) {
           return;
         }
 
-        updateNode(
-          selectedNode.id,
-          (node) => ({
-            ...node,
-            props: {
-              ...node.props,
-              [key]: value,
-            },
-          })
-        );
-      },
-      [
-        selectedNode,
-        updateNode,
-      ]
-    );
+        event.preventDefault();
 
-  const updateStyle =
-    useCallback(
-      (
-        key: string,
-        value: unknown
-      ) => {
-        if (
-          !selectedNode
-        ) {
-          return;
-        }
-
-        updateNode(
-          selectedNode.id,
-          (node) => ({
-            ...node,
-            styles: {
-              ...(node.styles ??
-                {}),
-              [key]: value,
-            },
-          })
-        );
+        panStart.current = {
+          x: pan.x,
+          y: pan.y,
+          clientX: event.clientX,
+          clientY: event.clientY,
+        };
       },
-      [
-        selectedNode,
-        updateNode,
-      ]
+      [pan]
     );
 
   useEffect(() => {
-    const onKey =
-      (event: KeyboardEvent) => {
-        const target =
-          event.target as HTMLElement;
+    const move = (
+      event: MouseEvent
+    ) => {
+      if (!panStart.current) {
+        return;
+      }
 
-        const typing =
-          [
-            "INPUT",
-            "TEXTAREA",
-            "SELECT",
-          ].includes(
-            target.tagName
-          ) ||
-          target.isContentEditable;
+      setPan({
+        x:
+          panStart.current.x +
+          event.clientX -
+          panStart.current.clientX,
+        y:
+          panStart.current.y +
+          event.clientY -
+          panStart.current.clientY,
+      });
+    };
 
-        if (
-          !typing &&
-          (event.metaKey ||
-            event.ctrlKey) &&
-          event.key.toLowerCase() ===
-            "s"
-        ) {
-          event.preventDefault();
-          save();
-        } else if (
-          !typing &&
-          (event.metaKey ||
-            event.ctrlKey) &&
-          event.key.toLowerCase() ===
-            "z"
-        ) {
-          event.preventDefault();
-
-          if (event.shiftKey) {
-            redo();
-          } else {
-            undo();
-          }
-        } else if (
-          !typing &&
-          (event.metaKey ||
-            event.ctrlKey) &&
-          event.key.toLowerCase() ===
-            "d"
-        ) {
-          event.preventDefault();
-          duplicate();
-        } else if (
-          !typing &&
-          (event.key ===
-            "Delete" ||
-            event.key ===
-              "Backspace")
-        ) {
-          event.preventDefault();
-          removeSelected();
-        } else if (
-          !typing &&
-          event.key ===
-            "Escape"
-        ) {
-          setSelected([]);
-          setDrop(null);
-        } else if (
-          !typing &&
-          selected.length &&
-          [
-            "ArrowUp",
-            "ArrowDown",
-            "ArrowLeft",
-            "ArrowRight",
-          ].includes(
-            event.key
-          )
-        ) {
-          event.preventDefault();
-
-          if (
-            event.key ===
-            "ArrowUp"
-          ) {
-            move(-1);
-          } else if (
-            event.key ===
-            "ArrowDown"
-          ) {
-            move(1);
-          } else {
-            const delta =
-              event.shiftKey
-                ? 10
-                : 1;
-
-            const direction =
-              event.key ===
-              "ArrowLeft"
-                ? -1
-                : 1;
-
-            const ids =
-              new Set<string>(
-                selected
-              );
-
-            commit(
-              (current) =>
-                pageWith(
-                  current,
-                  pageId,
-                  (
-                    currentPage
-                  ) => ({
-                    ...currentPage,
-                    components:
-                      mapNodes(
-                        currentPage.components,
-                        (node) =>
-                          ids.has(
-                            node.id
-                          )
-                            ? {
-                                ...node,
-                                styles: {
-                                  ...(node.styles ??
-                                    {}),
-                                  marginLeft:
-                                    px(
-                                      node
-                                        .styles
-                                        ?.marginLeft,
-                                      0
-                                    ) +
-                                    delta *
-                                      direction,
-                                },
-                              }
-                            : node
-                      ),
-                  })
-                )
-            );
-          }
-        } else if (
-          !typing &&
-          event.code ===
-            "Space"
-        ) {
-          setPanMode(true);
-        }
-      };
-
-    const up =
-      (event: KeyboardEvent) => {
-        if (
-          event.code ===
-          "Space"
-        ) {
-          setPanMode(false);
-        }
-      };
+    const up = () => {
+      panStart.current = null;
+    };
 
     window.addEventListener(
-      "keydown",
-      onKey
+      "mousemove",
+      move
     );
 
     window.addEventListener(
-      "keyup",
+      "mouseup",
       up
     );
 
     return () => {
       window.removeEventListener(
-        "keydown",
-        onKey
+        "mousemove",
+        move
       );
-
       window.removeEventListener(
-        "keyup",
+        "mouseup",
         up
       );
     };
-  }, [
-    save,
-    redo,
-    undo,
-    duplicate,
-    removeSelected,
-    selected,
-    move,
-    commit,
-    pageId,
-  ]);
+  }, []);
 
-  const beginCanvasInteraction =
-    useCallback(
-      (
-        event: ReactMouseEvent<HTMLDivElement>
-      ) => {
-        const target =
-          event.target as HTMLElement;
+  useEffect(() => {
+    const keydown = (
+      event: KeyboardEvent
+    ) => {
+      const target =
+        event.target as HTMLElement;
 
-        const nodeElement =
-          target.closest(
-            "[data-sytely-id]"
-          );
-
-        if (
-          panMode ||
-          event.button === 1
-        ) {
-          event.preventDefault();
-
-          panningRef.current =
-            {
-              x: pan.x,
-              y: pan.y,
-              sx: event.clientX,
-              sy: event.clientY,
-            };
-
-          return;
-        }
-
-        if (
-          event.button !== 0 ||
-          nodeElement
-        ) {
-          return;
-        }
-
-        setMarquee({
-          x: event.clientX,
-          y: event.clientY,
-          w: 0,
-          h: 0,
-        });
-      },
-      [
-        pan,
-        panMode,
-      ]
-    );
-
-  const canvasMove =
-    useCallback(
-      (
-        event: ReactMouseEvent<HTMLDivElement>
-      ) => {
-        if (
-          panningRef.current
-        ) {
-          setPan({
-            x:
-              panningRef.current
-                .x +
-              event.clientX -
-              panningRef.current
-                .sx,
-            y:
-              panningRef.current
-                .y +
-              event.clientY -
-              panningRef.current
-                .sy,
-          });
-
-          return;
-        }
-
-        if (marquee) {
-          setMarquee({
-            x: Math.min(
-              marquee.x,
-              event.clientX
-            ),
-            y: Math.min(
-              marquee.y,
-              event.clientY
-            ),
-            w: Math.abs(
-              event.clientX -
-                marquee.x
-            ),
-            h: Math.abs(
-              event.clientY -
-                marquee.y
-            ),
-          });
-        }
-      },
-      [marquee]
-    );
-
-  const endCanvasInteraction =
-    useCallback(() => {
-      panningRef.current =
-        null;
+      const editing =
+        target.tagName ===
+          "INPUT" ||
+        target.tagName ===
+          "TEXTAREA" ||
+        target.tagName ===
+          "SELECT" ||
+        target.isContentEditable;
 
       if (
-        !marquee ||
-        !page
+        !editing &&
+        (event.metaKey ||
+          event.ctrlKey) &&
+        event.key.toLowerCase() ===
+          "s"
       ) {
-        setMarquee(null);
+        event.preventDefault();
+        save();
         return;
       }
 
-      const left =
-        marquee.x;
-
-      const top =
-        marquee.y;
-
-      const right =
-        marquee.x +
-        marquee.w;
-
-      const bottom =
-        marquee.y +
-        marquee.h;
-
       if (
-        marquee.w > 4 ||
-        marquee.h > 4
+        !editing &&
+        (event.metaKey ||
+          event.ctrlKey) &&
+        event.key.toLowerCase() ===
+          "z"
       ) {
-        const hits =
-          Array.from(
-            document.querySelectorAll(
-              "[data-sytely-id]"
-            )
-          )
-            .filter(
-              (element) => {
-                const rect =
-                  (
-                    element as HTMLElement
-                  ).getBoundingClientRect();
-
-                return (
-                  rect.left <
-                    right &&
-                  rect.right >
-                    left &&
-                  rect.top <
-                    bottom &&
-                  rect.bottom >
-                    top
-                );
-              }
-            )
-            .map(
-              (element) =>
-                (
-                  element as HTMLElement
-                ).dataset
-                  .sytelyId
-            )
-            .filter(
-              (
-                value
-              ): value is string =>
-                Boolean(value)
-            );
-
-        setSelected(
-          hits
-        );
-      }
-
-      setMarquee(null);
-    }, [
-      marquee,
-      page,
-    ]);
-
-  const resizeNode =
-    useCallback(
-      (
-        nodeId: string,
-        edge:
-          | "right"
-          | "bottom"
-          | "corner",
-        event: ReactMouseEvent
-      ) => {
         event.preventDefault();
-        event.stopPropagation();
 
-        const element =
-          document.querySelector(
-            `[data-sytely-id="${CSS.escape(
-              nodeId
-            )}"]`
-          ) as HTMLElement | null;
-
-        if (!element) {
-          return;
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
         }
 
-        const startX =
-          event.clientX;
+        return;
+      }
 
-        const startY =
-          event.clientY;
+      if (
+        !editing &&
+        (event.metaKey ||
+          event.ctrlKey) &&
+        event.key.toLowerCase() ===
+          "d"
+      ) {
+        event.preventDefault();
+        duplicateSelected();
+        return;
+      }
 
-        const startWidth =
-          element.getBoundingClientRect()
-            .width;
+      if (
+        !editing &&
+        (event.key ===
+          "Delete" ||
+          event.key ===
+            "Backspace")
+      ) {
+        event.preventDefault();
+        deleteSelected();
+        return;
+      }
 
-        const startHeight =
-          element.getBoundingClientRect()
-            .height;
+      if (
+        !editing &&
+        event.key ===
+          "Escape"
+      ) {
+        setSelectedIds([]);
+        setPageSelected(true);
+      }
+    };
 
-        const move =
-          (
-            e: globalThis.MouseEvent
-          ) => {
-            const dx =
-              e.clientX -
-              startX;
-
-            const dy =
-              e.clientY -
-              startY;
-
-            if (
-              edge ===
-                "right" ||
-              edge === "corner"
-            ) {
-              element.style.width = `${Math.max(
-                40,
-                Math.round(
-                  startWidth +
-                    dx
-                )
-              )}px`;
-            }
-
-            if (
-              edge ===
-                "bottom" ||
-              edge === "corner"
-            ) {
-              element.style.minHeight = `${Math.max(
-                30,
-                Math.round(
-                  startHeight +
-                    dy
-                )
-              )}px`;
-            }
-          };
-
-        const up = () => {
-          const finalWidth =
-            parseFloat(
-              element.style
-                .width
-            );
-
-          const finalHeight =
-            parseFloat(
-              element.style
-                .minHeight
-            );
-
-          if (
-            edge ===
-              "right" ||
-            edge === "corner"
-          ) {
-            updateNode(
-              nodeId,
-              (node) => ({
-                ...node,
-                styles: {
-                  ...(node.styles ??
-                    {}),
-                  width:
-                    Number.isFinite(
-                      finalWidth
-                    )
-                      ? finalWidth
-                      : startWidth,
-                },
-              })
-            );
-          }
-
-          if (
-            edge ===
-              "bottom" ||
-            edge === "corner"
-          ) {
-            updateNode(
-              nodeId,
-              (node) => ({
-                ...node,
-                styles: {
-                  ...(node.styles ??
-                    {}),
-                  minHeight:
-                    Number.isFinite(
-                      finalHeight
-                    )
-                      ? finalHeight
-                      : startHeight,
-                },
-              })
-            );
-          }
-
-          window.removeEventListener(
-            "mousemove",
-            move
-          );
-
-          window.removeEventListener(
-            "mouseup",
-            up
-          );
-        };
-
-        window.addEventListener(
-          "mousemove",
-          move
-        );
-
-        window.addEventListener(
-          "mouseup",
-          up
-        );
-      },
-      [updateNode]
+    window.addEventListener(
+      "keydown",
+      keydown
     );
 
-  const resetView = () => {
-    setZoom(80);
-    setPan({
-      x: 0,
-      y: 0,
-    });
-  };
+    return () =>
+      window.removeEventListener(
+        "keydown",
+        keydown
+      );
+  }, [
+    save,
+    undo,
+    redo,
+    duplicateSelected,
+    deleteSelected,
+  ]);
 
-  const openPreview = () => {
-    if (
-      !site ||
-      !page
-    ) {
-      return;
-    }
+  const openPreview =
+    useCallback(() => {
+      if (!site || !currentPage) {
+        return;
+      }
 
-    const slug =
-      site.slug ||
-      slugify(
-        site.name
+      const slug =
+        (
+          site as Site & {
+            slug?: string;
+          }
+        ).slug ||
+        slugify(site.name);
+
+      const params =
+        new URLSearchParams();
+
+      params.set(
+        "page",
+        currentPage.slug
       );
 
-    const query =
-      new URLSearchParams({
-        page: page.slug,
-        device,
-      }).toString();
+      params.set(
+        "device",
+        device
+      );
 
-    window.open(
-      `/${slug}/preview?${query}`,
-      "_blank",
-      "noopener,noreferrer"
-    );
-  };
+      window.open(
+        `/${slug}/preview?${params.toString()}`,
+        "_blank",
+        "noopener,noreferrer"
+      );
+    }, [
+      site,
+      currentPage,
+      device,
+    ]);
 
-  const filtered =
-    types.filter(
-      (type) =>
-        info[type][1]
+  const filteredComponents =
+    COMPONENTS.filter(
+      (component) =>
+        component.label
           .toLowerCase()
           .includes(
             search.toLowerCase()
           )
     );
 
-  if (!site || !page) {
+  if (!site) {
     return (
-      <main className="editor-loading">
-        <strong>
-          {status ===
-          "Website not found"
-            ? status
-            : "Loading editor…"}
-        </strong>
-
-        <a href="/mysites">
-          Back to My Sites
-        </a>
+      <main className="sytely-editor-loading">
+        <div>
+          <strong>
+            {status ===
+            "Website not found"
+              ? "Website not found"
+              : "Loading editor…"}
+          </strong>
+          <a href="/mysites">
+            Back to My Sites
+          </a>
+        </div>
       </main>
     );
   }
 
   return (
-    <div className="editor-shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <a
-            className="brand"
-            href="/mysites"
-          >
-            Sytely
-          </a>
-
-          <span>/</span>
-        </div>
-
-        <button
-          className="site-name-button"
-          type="button"
-          onClick={
-            renameSite
-          }
+    <div className="sytely-editor">
+      <header className="editor-topbar">
+        <a
+          href="/mysites"
+          className="editor-brand"
         >
-          {site.name}
+          <span className="editor-brand-mark">
+            S
+          </span>
+          <span>Sytely</span>
+        </a>
 
-          <span>⌄</span>
-        </button>
+        <SiteName
+          site={site}
+          onRename={renameSite}
+        />
 
-        <div className="top-center">
+        <div className="editor-history">
           <button
             type="button"
             onClick={undo}
             disabled={
-              !history.length
+              history.length === 0
             }
+            title="Undo"
           >
             ↶
           </button>
@@ -3382,49 +2063,50 @@ export default function Editor({
             type="button"
             onClick={redo}
             disabled={
-              !future.length
+              future.length === 0
             }
+            title="Redo"
           >
             ↷
           </button>
-
-          <div className="device-switcher">
-            {(
-              [
-                "desktop",
-                "tablet",
-                "mobile",
-              ] as Device[]
-            ).map(
-              (item) => (
-                <button
-                  key={item}
-                  className={
-                    device ===
-                    item
-                      ? "active"
-                      : ""
-                  }
-                  type="button"
-                  onClick={() =>
-                    setDevice(
-                      item
-                    )
-                  }
-                >
-                  {item}
-                </button>
-              )
-            )}
-          </div>
         </div>
 
-        <div className="top-actions">
+        <div className="editor-device-switcher">
+          {(
+            [
+              [
+                "desktop",
+                "Desktop",
+              ],
+              ["tablet", "Tablet"],
+              ["mobile", "Mobile"],
+            ] as const
+          ).map(
+            ([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={
+                  device === value
+                    ? "active"
+                    : ""
+                }
+                onClick={() =>
+                  setDevice(value)
+                }
+              >
+                {label}
+              </button>
+            )
+          )}
+        </div>
+
+        <div className="editor-top-actions">
           <span
             className={
               dirty
-                ? "dirty"
-                : ""
+                ? "save-state dirty"
+                : "save-state"
             }
           >
             {status}
@@ -3432,16 +2114,15 @@ export default function Editor({
 
           <button
             type="button"
-            onClick={
-              openPreview
-            }
+            className="secondary-button"
+            onClick={openPreview}
           >
             Preview
           </button>
 
           <button
-            className="primary-button"
             type="button"
+            className="primary-button"
             onClick={save}
           >
             Save
@@ -3449,34 +2130,37 @@ export default function Editor({
         </div>
       </header>
 
-      <div className="workspace">
-        <aside className="left-panel">
-          <nav className="tabs">
+      <div className="editor-body">
+        <aside className="editor-sidebar">
+          <nav className="sidebar-tabs">
             {(
               [
-                "components",
-                "templates",
-                "pages",
-                "layers",
-              ] as Panel[]
+                [
+                  "components",
+                  "Build",
+                ],
+                [
+                  "templates",
+                  "Templates",
+                ],
+                ["pages", "Pages"],
+                ["layers", "Layers"],
+              ] as const
             ).map(
-              (item) => (
+              ([value, label]) => (
                 <button
-                  key={item}
+                  key={value}
+                  type="button"
                   className={
-                    panel ===
-                    item
+                    panel === value
                       ? "active"
                       : ""
                   }
-                  type="button"
                   onClick={() =>
-                    setPanel(
-                      item
-                    )
+                    setPanel(value)
                   }
                 >
-                  {item}
+                  {label}
                 </button>
               )
             )}
@@ -3484,65 +2168,68 @@ export default function Editor({
 
           {panel ===
             "components" && (
-            <div className="panel-content">
+            <div className="sidebar-content">
+              <div className="panel-heading">
+                <div>
+                  <strong>
+                    Components
+                  </strong>
+                  <span>
+                    Drag or click to add.
+                  </span>
+                </div>
+              </div>
+
               <input
-                className="search"
+                className="component-search"
                 value={search}
-                onChange={(
-                  event
-                ) =>
+                onChange={(event) =>
                   setSearch(
-                    event.target
-                      .value
+                    event.target.value
                   )
                 }
                 placeholder="Search components"
               />
 
-              <p className="hint">
-                Drag into the page.
-                Drop beside another
-                component to create
-                columns.
-              </p>
-
-              <div className="palette">
-                {filtered.map(
-                  (type) => (
+              <div className="component-grid">
+                {filteredComponents.map(
+                  (component) => (
                     <button
-                      key={type}
-                      draggable
+                      key={
+                        component.type
+                      }
                       type="button"
-                      className="palette-item"
+                      draggable
+                      className="component-card"
                       onClick={() =>
                         addComponent(
-                          type
+                          component.type
                         )
                       }
                       onDragStart={(
                         event
                       ) =>
-                        paletteDrag(
+                        setDragPayload(
                           event,
-                          type
+                          {
+                            kind:
+                              "component",
+                            type:
+                              component.type,
+                          }
                         )
                       }
                     >
-                      <b>
-                        {
-                          info[
-                            type
-                          ][0]
-                        }
-                      </b>
-
                       <span>
                         {
-                          info[
-                            type
-                          ][1]
+                          component.icon
                         }
                       </span>
+                      <small>
+                        {
+                          component.label
+                        }
+                      </small>
                     </button>
                   )
                 )}
@@ -3552,174 +2239,82 @@ export default function Editor({
 
           {panel ===
             "templates" && (
-            <div className="panel-content">
-              <p className="hint">
-                Editable starter
-                sections.
-              </p>
+            <div className="sidebar-content">
+              <div className="panel-heading">
+                <div>
+                  <strong>
+                    Templates
+                  </strong>
+                  <span>
+                    Complete editable sections.
+                  </span>
+                </div>
+              </div>
 
               {[
                 [
                   "Hero",
-                  section(
-                    [
-                      makeComponent(
-                        "heading"
-                      ),
-                      makeComponent(
-                        "text"
-                      ),
-                      makeComponent(
-                        "button"
-                      ),
-                    ],
-                    {
-                      alignItems:
-                        "center",
-                    }
-                  ),
+                  "heading",
                 ],
                 [
-                  "Split",
-                  section(
-                    [
-                      section([
-                        makeComponent(
-                          "heading"
-                        ),
-                        makeComponent(
-                          "text"
-                        ),
-                      ]),
-                      makeComponent(
-                        "image"
-                      ),
-                    ],
-                    {
-                      display:
-                        "grid",
-                      gridTemplateColumns:
-                        "repeat(2,minmax(0,1fr))",
-                    }
-                  ),
-                ],
-                [
-                  "Features",
-                  section([
-                    makeComponent(
-                      "features"
-                    ),
-                  ]),
-                ],
-                [
-                  "Stats",
-                  section([
-                    n(
-                      "features",
-                      {
-                        columns: 3,
-                      },
-                      {
-                        display:
-                          "grid",
-                        gridTemplateColumns:
-                          "repeat(3,minmax(0,1fr))",
-                      }
-                    ),
-                  ]),
+                  "Feature grid",
+                  "features",
                 ],
                 [
                   "Pricing",
-                  section([
-                    makeComponent(
-                      "pricing"
-                    ),
-                  ]),
-                ],
-                [
-                  "Testimonial",
-                  section([
-                    makeComponent(
-                      "testimonial"
-                    ),
-                  ]),
-                ],
-                [
-                  "FAQ",
-                  section([
-                    makeComponent(
-                      "faq"
-                    ),
-                    makeComponent(
-                      "faq"
-                    ),
-                    makeComponent(
-                      "faq"
-                    ),
-                  ]),
+                  "pricing",
                 ],
                 [
                   "Contact",
-                  section(
-                    [
-                      makeComponent(
-                        "contact"
-                      ),
-                      makeComponent(
-                        "form"
-                      ),
-                    ],
-                    {
-                      display:
-                        "grid",
-                      gridTemplateColumns:
-                        "repeat(2,minmax(0,1fr))",
-                    }
-                  ),
+                  "contact",
                 ],
                 [
                   "Footer",
-                  section([
-                    makeComponent(
-                      "footer"
-                    ),
-                  ]),
+                  "footer",
                 ],
               ].map(
-                ([
-                  name,
-                  template,
-                ]) => (
+                ([label, type]) => (
                   <button
-                    key={String(
-                      name
-                    )}
-                    draggable
+                    key={label}
                     type="button"
-                    className="template-item"
-                    onClick={() =>
-                      addTemplate(
-                        template as ComponentNode
-                      )
-                    }
-                    onDragStart={(
-                      event
-                    ) =>
-                      templateDrag(
-                        event,
-                        template as ComponentNode
-                      )
-                    }
+                    className="template-card"
+                    onClick={() => {
+                      const section =
+                        makeNode(
+                          "section"
+                        );
+
+                      section.children =
+                        [
+                          makeNode(
+                            type as ComponentType
+                          ),
+                        ];
+
+                      updatePage(
+                        (page) => ({
+                          ...page,
+                          components:
+                            [
+                              ...page.components,
+                              section,
+                            ],
+                        })
+                      );
+
+                      setSelectedIds([
+                        section.id,
+                      ]);
+                      setPageSelected(
+                        false
+                      );
+                    }}
                   >
                     <strong>
-                      {String(
-                        name
-                      )}
+                      {label}
                     </strong>
-
                     <span>
-                      Drag or click
-                      to add
+                      Editable responsive section
                     </span>
                   </button>
                 )
@@ -3727,153 +2322,153 @@ export default function Editor({
             </div>
           )}
 
-          {panel ===
-            "pages" && (
-            <div className="panel-content">
+          {panel === "pages" && (
+            <div className="sidebar-content">
               <div className="panel-heading">
-                <strong>
-                  Pages
-                </strong>
+                <div>
+                  <strong>
+                    Pages
+                  </strong>
+                  <span>
+                    Pages in this website.
+                  </span>
+                </div>
 
                 <button
                   type="button"
-                  onClick={
-                    addPage
-                  }
+                  className="small-action"
+                  onClick={addPage}
                 >
                   +
                 </button>
               </div>
 
-              {site.pages.map(
-                (item) => (
-                  <div
-                    key={item.id}
-                    className={
-                      item.id ===
-                      page.id
-                        ? "page-item active"
-                        : "page-item"
-                    }
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPageId(
-                          item.id
-                        );
-                        setSelected(
-                          []
-                        );
-                      }}
+              <div className="page-list">
+                {site.pages.map(
+                  (page) => (
+                    <div
+                      key={page.id}
+                      className={
+                        page.id ===
+                        activePageId
+                          ? "page-row active"
+                          : "page-row"
+                      }
                     >
-                      <strong>
-                        {item.name}
-                      </strong>
-
-                      <small>
-                        {item.slug}
-                      </small>
-                    </button>
-
-                    <div>
                       <button
                         type="button"
-                        onClick={() =>
-                          renamePage(
-                            item.id
-                          )
-                        }
+                        onClick={() => {
+                          setActivePageId(
+                            page.id
+                          );
+                          setSelectedIds(
+                            []
+                          );
+                          setPageSelected(
+                            true
+                          );
+                        }}
                       >
-                        …
+                        <strong>
+                          {page.name}
+                        </strong>
+                        <span>
+                          {page.slug}
+                        </span>
                       </button>
 
-                      {site.pages
-                        .length >
-                        1 && (
+                      <div>
                         <button
                           type="button"
                           onClick={() =>
-                            deletePage(
-                              item.id
+                            renamePage(
+                              page.id
                             )
                           }
                         >
-                          ×
+                          …
                         </button>
-                      )}
+
+                        {site.pages
+                          .length >
+                          1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              deletePage(
+                                page.id
+                              )
+                            }
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
-              )}
+                  )
+                )}
+              </div>
             </div>
           )}
 
-          {panel ===
-            "layers" && (
-            <div className="panel-content">
+          {panel === "layers" && (
+            <div className="sidebar-content">
+              <div className="panel-heading">
+                <div>
+                  <strong>
+                    Layers
+                  </strong>
+                  <span>
+                    Select any nested element.
+                  </span>
+                </div>
+              </div>
+
               <LayerTree
                 nodes={
-                  page.components
+                  currentPage?.components ??
+                  []
                 }
-                selected={
-                  selected
+                selectedIds={
+                  selectedIds
                 }
-                onSelect={(
-                  id
-                ) =>
-                  setSelected([
-                    id,
-                  ])
-                }
+                onSelect={(nodeId) => {
+                  setSelectedIds([
+                    nodeId,
+                  ]);
+                  setPageSelected(
+                    false
+                  );
+                }}
               />
             </div>
           )}
         </aside>
 
-        <main
-          className={
-            panMode
-              ? "canvas-area panning"
-              : "canvas-area"
-          }
-          onMouseDown={
-            beginCanvasInteraction
-          }
-          onMouseMove={
-            canvasMove
-          }
-          onMouseUp={
-            endCanvasInteraction
-          }
-          onMouseLeave={
-            endCanvasInteraction
-          }
-          onClick={(event) => {
-            if (
-              event.target ===
-              event.currentTarget
-            ) {
-              setSelected([]);
-            }
-          }}
-          onDragOver={
-            onDragOver
-          }
-          onDrop={
-            performDrop
-          }
-        >
-          <div className="canvas-tools">
-            <span>
-              {page.name}
-
-              <small>
-                {page.slug}
-              </small>
-            </span>
-
+        <main className="editor-main">
+          <div className="canvas-toolbar">
             <div>
+              <strong>
+                {currentPage?.name}
+              </strong>
+              <span className="muted">
+                {currentPage?.slug}
+              </span>
+            </div>
+
+            <div className="canvas-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  setPan({
+                    x: 0,
+                    y: 0,
+                  })
+                }
+              >
+                Reset pan
+              </button>
+
               <button
                 type="button"
                 onClick={() =>
@@ -3889,9 +2484,9 @@ export default function Editor({
                 −
               </button>
 
-              <b>
+              <span>
                 {zoom}%
-              </b>
+              </span>
 
               <button
                 type="button"
@@ -3899,7 +2494,7 @@ export default function Editor({
                   setZoom(
                     (value) =>
                       Math.min(
-                        180,
+                        200,
                         value + 5
                       )
                   )
@@ -3907,590 +2502,696 @@ export default function Editor({
               >
                 +
               </button>
-
-              <button
-                type="button"
-                onClick={
-                  resetView
-                }
-              >
-                Reset
-              </button>
-
-              <button
-                type="button"
-                className={
-                  panMode
-                    ? "active"
-                    : ""
-                }
-                onClick={() =>
-                  setPanMode(
-                    (value) =>
-                      !value
-                  )
-                }
-              >
-                Pan
-              </button>
             </div>
           </div>
 
-          <div className="canvas-scroll">
+          <div
+            className="canvas-area"
+            onMouseDown={beginPan}
+            onClick={(event) => {
+              if (
+                event.target ===
+                event.currentTarget
+              ) {
+                setSelectedIds([]);
+                setPageSelected(
+                  true
+                );
+              }
+            }}
+            onDragOver={(event) =>
+              event.preventDefault()
+            }
+            onDrop={(event) =>
+              handleDrop(
+                event,
+                currentPage,
+                updatePage,
+                setSelectedIds,
+                setPageSelected
+              )
+            }
+          >
             <div
-              className="canvas-space"
+              className={`canvas-stage device-${device}`}
               style={{
-                transform: `translate(${pan.x}px,${pan.y}px)`,
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`,
               }}
             >
               <div
-                className={`page-frame device-${device}`}
+                className="website-page"
                 style={{
-                  transform: `scale(${
-                    zoom / 100
-                  })`,
-                  transformOrigin:
-                    "top left",
+                  background:
+                    getString(
+                      currentPage
+                        ?.styles
+                        ?.background,
+                      "var(--sytely-page)"
+                    ),
+                  paddingTop:
+                    getNumber(
+                      currentPage
+                        ?.margins
+                        ?.top,
+                      0
+                    ),
+                  paddingRight:
+                    getNumber(
+                      currentPage
+                        ?.margins
+                        ?.right,
+                      32
+                    ),
+                  paddingBottom:
+                    getNumber(
+                      currentPage
+                        ?.margins
+                        ?.bottom,
+                      0
+                    ),
+                  paddingLeft:
+                    getNumber(
+                      currentPage
+                        ?.margins
+                        ?.left,
+                      32
+                    ),
                 }}
               >
-                <div
-                  className="page-content"
-                  style={{
-                    background:
-                      typeof page
-                        .styles
-                        ?.background ===
-                      "string"
-                        ? page
-                            .styles
-                            .background
-                        : "var(--sytely-page)",
-
-                    paddingTop:
-                      px(
-                        page
-                          .margins
-                          .top,
-                        0
-                      ),
-
-                    paddingRight:
-                      px(
-                        page
-                          .margins
-                          .right,
-                        32
-                      ),
-
-                    paddingBottom:
-                      px(
-                        page
-                          .margins
-                          .bottom,
-                        0
-                      ),
-
-                    paddingLeft:
-                      px(
-                        page
-                          .margins
-                          .left,
-                        32
-                      ),
-                  }}
-                  onClick={(
-                    event
-                  ) => {
-                    if (
-                      event.target ===
-                      event.currentTarget
-                    ) {
-                      setSelected(
-                        []
-                      );
-                    }
-                  }}
-                >
-                  <SytelyRenderer
-                    nodes={
-                      page.components
-                    }
-                    device={
-                      device
-                    }
-                    editable
-                    selectedIds={
-                      selected
-                    }
-                    onNodeClick={
-                      selectNode
-                    }
-                    onNodeDragStart={(
-                      event
-                    ) => {
-                      const id =
-                        (
-                          event.currentTarget as HTMLElement
-                        ).dataset
-                          .sytelyId;
-
-                      if (id) {
-                        onDragStart(
-                          event,
-                          id
-                        );
+                {currentPage?.components.map(
+                  (node) => (
+                    <EditorNode
+                      key={node.id}
+                      node={node}
+                      selectedIds={
+                        selectedIds
                       }
-                    }}
-                  />
-                </div>
+                      device={device}
+                      onSelect={
+                        selectNode
+                      }
+                      onDragStart={(
+                        event,
+                        nodeId
+                      ) =>
+                        setDragPayload(
+                          event,
+                          {
+                            kind: "node",
+                            nodeIds:
+                              selectedIds.includes(
+                                nodeId
+                              )
+                                ? selectedIds
+                                : [
+                                    nodeId,
+                                  ],
+                          }
+                        )
+                      }
+                      onDropInside={(
+                        event,
+                        nodeId
+                      ) =>
+                        handleDropInside(
+                          event,
+                          nodeId,
+                          currentPage,
+                          updatePage,
+                          setSelectedIds,
+                          setPageSelected
+                        )
+                      }
+                    />
+                  )
+                )}
+
+                {pageSelected && (
+                  <div className="page-selection">
+                    <span>
+                      Page
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
-          {marquee && (
-            <div
-              className="marquee"
-              style={{
-                left:
-                  marquee.x,
-                top:
-                  marquee.y,
-                width:
-                  marquee.w,
-                height:
-                  marquee.h,
-              }}
+          {selectedNode && (
+            <FloatingToolbar
+              selectedCount={
+                selectedIds.length
+              }
+              onDuplicate={
+                duplicateSelected
+              }
+              onMoveUp={() =>
+                moveSelected(-1)
+              }
+              onMoveDown={() =>
+                moveSelected(1)
+              }
+              onGroup={
+                groupSelected
+              }
+              onUngroup={
+                ungroupSelected
+              }
+              onCopyStyle={
+                copyStyle
+              }
+              onPasteStyle={
+                pasteStyle
+              }
+              canPasteStyle={
+                Boolean(styleClipboard)
+              }
+              onDelete={
+                deleteSelected
+              }
             />
-          )}
-
-          {drop && (
-            <DropMarker
-              target={drop}
-            />
-          )}
-
-          {dragging && (
-            <div className="drag-hint">
-              Drop before, after,
-              or inside. Drop
-              beside a component
-              to make columns.
-            </div>
           )}
 
           {selectedNode && (
-            <SelectionOverlay
-              nodeId={
-                selectedNode.id
+            <Inspector
+              node={selectedNode}
+              updateProp={updateProp}
+              updateStyle={updateStyle}
+              uploadImage={
+                beginImageUpload
               }
-              onDelete={
-                removeSelected
+              numericDrafts={
+                numericDrafts
               }
-              onResize={
-                resizeNode
+              setNumericDrafts={
+                setNumericDrafts
+              }
+              onAddColumn={() =>
+                addColumnBeside(
+                  selectedNode.id,
+                  "card"
+                )
               }
             />
           )}
 
-          {selected.length >
-            0 && (
-            <div className="floating-toolbar">
-              <span>
-                {selected.length}{" "}
-                selected
-              </span>
-
-              <button
-                type="button"
-                onClick={
-                  duplicate
-                }
-              >
-                Duplicate
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  move(-1)
-                }
-              >
-                ↑
-              </button>
-
-              <button
-                type="button"
-                onClick={() =>
-                  move(1)
-                }
-              >
-                ↓
-              </button>
-
-              <button
-                type="button"
-                onClick={
-                  group
-                }
-                disabled={
-                  selected.length <
-                  2
-                }
-              >
-                Group
-              </button>
-
-              <button
-                type="button"
-                onClick={
-                  ungroup
-                }
-              >
-                Ungroup
-              </button>
-
-              <button
-                className="danger"
-                type="button"
-                onClick={
-                  removeSelected
-                }
-              >
-                Delete
-              </button>
-            </div>
-          )}
+          {!selectedNode &&
+            pageSelected &&
+            currentPage && (
+              <PageInspector
+                page={currentPage}
+                updatePage={updatePage}
+              />
+            )}
         </main>
-
-        {selectedNode && (
-          <Inspector
-            node={
-              selectedNode
-            }
-            updateProp={
-              updateProp
-            }
-            updateStyle={
-              updateStyle
-            }
-            numericDraft={
-              numericDraft
-            }
-            setNumericDraft={
-              setNumericDraft
-            }
-            uploadImage={() => {
-              setImageTarget(
-                selectedNode.id
-              );
-
-              fileRef.current?.click();
-            }}
-          />
-        )}
       </div>
 
       <input
-        ref={fileRef}
+        ref={imageInput}
         hidden
         type="file"
         accept="image/*"
-        multiple={
-          selectedNode?.type ===
-          "gallery"
-        }
         onChange={
-          onImageUpload
+          handleImageUpload
         }
       />
     </div>
   );
 }
 
-function LayerTree({
-  nodes,
-  selected,
-  onSelect,
-  depth = 0,
-}: {
-  nodes: ComponentNode[];
-  selected: string[];
-  onSelect: (
-    id: string
-  ) => void;
-  depth?: number;
-}) {
-  return (
-    <>
-      {nodes.map(
-        (node) => (
-          <div key={node.id}>
-            <button
-              type="button"
-              className={
-                selected.includes(
-                  node.id
-                )
-                  ? "layer active"
-                  : "layer"
-              }
-              style={{
-                paddingLeft:
-                  8 +
-                  depth * 14,
-              }}
-              onClick={() =>
-                onSelect(
-                  node.id
-                )
-              }
-            >
-              <span>
-                {
-                  info[
-                    node.type
-                  ][0]
-                }
-              </span>
+function insertAt<T>(
+  items: T[],
+  item: T,
+  index: number
+): T[] {
+  const result = [...items];
+  result.splice(index, 0, item);
+  return result;
+}
 
-              <b>
-                {
-                  info[
-                    node.type
-                  ][1]
-                }
-              </b>
-            </button>
+function insertAfterId(
+  items: ComponentNode[],
+  id: string,
+  additions: ComponentNode[]
+): ComponentNode[] {
+  const result = [...items];
+  const index =
+    result.findIndex(
+      (item) => item.id === id
+    );
 
-            {node.children
-              ?.length ? (
-              <LayerTree
-                nodes={
-                  node.children
-                }
-                selected={
-                  selected
-                }
-                onSelect={
-                  onSelect
-                }
-                depth={
-                  depth + 1
-                }
-              />
-            ) : null}
-          </div>
-        )
-      )}
-    </>
+  if (index < 0) {
+    return result;
+  }
+
+  result.splice(
+    index + 1,
+    0,
+    ...additions
+  );
+
+  return result;
+}
+
+function setDragPayload(
+  event: DragEvent,
+  payload: DragPayload
+) {
+  event.dataTransfer.effectAllowed =
+    payload.kind === "node"
+      ? "move"
+      : "copy";
+
+  event.dataTransfer.setData(
+    "application/sytely",
+    JSON.stringify(payload)
   );
 }
 
-function DropMarker({
-  target,
-}: {
-  target: DropTarget;
-}) {
-  const [rect, setRect] =
-    useState<DOMRect | null>(
-      null
+function handleDrop(
+  event: DragEvent,
+  page: SitePage | null,
+  updatePage: (
+    updater: (
+      page: SitePage
+    ) => SitePage
+  ) => void,
+  setSelectedIds: Dispatch<
+    SetStateAction<string[]>
+  >,
+  setPageSelected: Dispatch<
+    SetStateAction<boolean>
+  >
+) {
+  event.preventDefault();
+
+  if (!page) {
+    return;
+  }
+
+  const raw =
+    event.dataTransfer.getData(
+      "application/sytely"
     );
 
-  useEffect(() => {
-    if (!target.id) {
+  if (!raw) {
+    return;
+  }
+
+  try {
+    const payload =
+      JSON.parse(raw) as DragPayload;
+
+    if (
+      payload.kind ===
+        "component" &&
+      payload.type
+    ) {
+      const node =
+        makeNode(payload.type);
+
+      updatePage((current) => ({
+        ...current,
+        components: [
+          ...current.components,
+          node,
+        ],
+      }));
+
+      setSelectedIds([node.id]);
+      setPageSelected(false);
       return;
     }
 
-    const element =
-      document.querySelector(
-        `[data-sytely-id="${CSS.escape(
-          target.id
-        )}"]`
-      ) as HTMLElement | null;
-
-    if (element) {
-      setRect(
-        element.getBoundingClientRect()
+    if (
+      payload.kind === "node" &&
+      payload.nodeIds.length
+    ) {
+      const ids = new Set(
+        payload.nodeIds
       );
+
+      const result =
+        removeNodes(
+          page.components,
+          ids
+        );
+
+      if (!result.removed.length) {
+        return;
+      }
+
+      const clones =
+        result.removed.map(
+          cloneNode
+        );
+
+      updatePage((current) => ({
+        ...current,
+        components:
+          insertNodes(
+            result.nodes,
+            null,
+            clones
+          ),
+      }));
+
+      setSelectedIds(
+        clones.map(
+          (node) => node.id
+        )
+      );
+
+      setPageSelected(false);
     }
-  }, [target]);
+  } catch {
+    // Invalid drag payload.
+  }
+}
 
-  if (!rect) {
-    return null;
+function handleDropInside(
+  event: DragEvent,
+  targetId: string,
+  page: SitePage | null,
+  updatePage: (
+    updater: (
+      page: SitePage
+    ) => SitePage
+  ) => void,
+  setSelectedIds: Dispatch<
+    SetStateAction<string[]>
+  >,
+  setPageSelected: Dispatch<
+    SetStateAction<boolean>
+  >
+) {
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (!page) {
+    return;
   }
 
-  if (
-    target.position ===
-    "inside"
-  ) {
-    return (
-      <div
-        className="drop-inside"
-        style={{
-          left: rect.left,
-          top: rect.top,
-          width: rect.width,
-          height: rect.height,
-        }}
-      >
-        <span>
-          Drop inside
-        </span>
-      </div>
+  const raw =
+    event.dataTransfer.getData(
+      "application/sytely"
     );
+
+  if (!raw) {
+    return;
   }
 
-  const after =
-    target.position ===
-    "after";
+  try {
+    const payload =
+      JSON.parse(raw) as DragPayload;
 
+    if (
+      payload.kind ===
+      "component"
+    ) {
+      const node =
+        makeNode(payload.type);
+
+      updatePage((current) => ({
+        ...current,
+        components:
+          insertNodes(
+            current.components,
+            targetId,
+            [node]
+          ),
+      }));
+
+      setSelectedIds([node.id]);
+      setPageSelected(false);
+      return;
+    }
+
+    if (
+      payload.kind === "node"
+    ) {
+      const ids = new Set(
+        payload.nodeIds
+      );
+
+      if (ids.has(targetId)) {
+        return;
+      }
+
+      const result =
+        removeNodes(
+          page.components,
+          ids
+        );
+
+      if (!result.removed.length) {
+        return;
+      }
+
+      const target =
+        findNode(
+          result.nodes,
+          targetId
+        );
+
+      if (!target) {
+        return;
+      }
+
+      const moved =
+        result.removed;
+
+      updatePage((current) => ({
+        ...current,
+        components:
+          insertNodes(
+            result.nodes,
+            targetId,
+            moved
+          ),
+      }));
+
+      setSelectedIds(
+        moved.map(
+          (node) => node.id
+        )
+      );
+
+      setPageSelected(false);
+    }
+  } catch {
+    // Invalid payload.
+  }
+}
+
+function EditorNode({
+  node,
+  selectedIds,
+  device,
+  onSelect,
+  onDragStart,
+  onDropInside,
+}: {
+  node: ComponentNode;
+  selectedIds: string[];
+  device: Device;
+  onSelect: (
+    id: string,
+    additive: boolean
+  ) => void;
+  onDragStart: (
+    event: DragEvent,
+    nodeId: string
+  ) => void;
+  onDropInside: (
+    event: DragEvent,
+    nodeId: string
+  ) => void;
+}) {
+  const selected =
+    selectedIds.includes(node.id);
+
+  const children =
+    node.children ?? [];
+
+  /*
+   * The rendered component itself is the
+   * visual target. The editor overlay is
+   * absolutely positioned and does not
+   * create a layout box around buttons,
+   * images, text, etc.
+   */
   return (
     <div
-      className="drop-line"
-      style={{
-        left: after
-          ? rect.right - 2
-          : rect.left - 2,
-        top: rect.top,
-        width: 4,
-        height:
-          rect.height,
+      className={
+        selected
+          ? "editor-node editor-node-selected"
+          : "editor-node"
+      }
+      data-editor-id={node.id}
+      draggable
+      onDragStart={(event) =>
+        onDragStart(
+          event,
+          node.id
+        )
+      }
+      onDragOver={(event) =>
+        event.preventDefault()
+      }
+      onDrop={(event) =>
+        onDropInside(
+          event,
+          node.id
+        )
+      }
+      onClick={(event) => {
+        event.stopPropagation();
+
+        onSelect(
+          node.id,
+          event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey
+        );
       }}
-    />
+    >
+      <div className="editor-rendered-node">
+        {renderNode(node, {
+          device,
+          renderChildren: false,
+        })}
+      </div>
+
+      {children.length > 0 && (
+        <div className="editor-node-children">
+          {children.map(
+            (child) => (
+              <EditorNode
+                key={child.id}
+                node={child}
+                selectedIds={
+                  selectedIds
+                }
+                device={device}
+                onSelect={
+                  onSelect
+                }
+                onDragStart={
+                  onDragStart
+                }
+                onDropInside={
+                  onDropInside
+                }
+              />
+            )
+          )}
+        </div>
+      )}
+
+      {selected && (
+        <div
+          className="editor-selection-overlay"
+          aria-hidden="true"
+        >
+          <span className="editor-node-label">
+            {node.type}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 
-function SelectionOverlay({
-  nodeId,
+function FloatingToolbar({
+  selectedCount,
+  onDuplicate,
+  onMoveUp,
+  onMoveDown,
+  onGroup,
+  onUngroup,
+  onCopyStyle,
+  onPasteStyle,
+  canPasteStyle,
   onDelete,
-  onResize,
 }: {
-  nodeId: string;
+  selectedCount: number;
+  onDuplicate: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onGroup: () => void;
+  onUngroup: () => void;
+  onCopyStyle: () => void;
+  onPasteStyle: () => void;
+  canPasteStyle: boolean;
   onDelete: () => void;
-  onResize: (
-    nodeId: string,
-    edge:
-      | "right"
-      | "bottom"
-      | "corner",
-    event: ReactMouseEvent
-  ) => void;
 }) {
-  const [rect, setRect] =
-    useState<DOMRect | null>(
-      null
-    );
-
-  useEffect(() => {
-    const update = () => {
-      const element =
-        document.querySelector(
-          `[data-sytely-id="${CSS.escape(
-            nodeId
-          )}"]`
-        ) as HTMLElement | null;
-
-      if (element) {
-        setRect(
-          element.getBoundingClientRect()
-        );
-      }
-    };
-
-    update();
-
-    window.addEventListener(
-      "resize",
-      update
-    );
-
-    window.addEventListener(
-      "scroll",
-      update,
-      true
-    );
-
-    const timer =
-      window.setInterval(
-        update,
-        120
-      );
-
-    return () => {
-      window.removeEventListener(
-        "resize",
-        update
-      );
-
-      window.removeEventListener(
-        "scroll",
-        update,
-        true
-      );
-
-      window.clearInterval(
-        timer
-      );
-    };
-  }, [nodeId]);
-
-  if (!rect) {
-    return null;
-  }
-
   return (
-    <div
-      className="selection-overlay"
-      style={{
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-      }}
-    >
+    <div className="floating-toolbar">
       <span>
-        Selected
+        {selectedCount} selected
       </span>
 
       <button
         type="button"
-        onClick={onDelete}
+        onClick={onDuplicate}
       >
-        ×
+        Duplicate
       </button>
 
-      <i
-        className="resize-right"
-        onMouseDown={(event) =>
-          onResize(
-            nodeId,
-            "right",
-            event
-          )
-        }
-      />
+      <button
+        type="button"
+        onClick={onMoveUp}
+      >
+        ↑
+      </button>
 
-      <i
-        className="resize-bottom"
-        onMouseDown={(event) =>
-          onResize(
-            nodeId,
-            "bottom",
-            event
-          )
-        }
-      />
+      <button
+        type="button"
+        onClick={onMoveDown}
+      >
+        ↓
+      </button>
 
-      <i
-        className="resize-corner"
-        onMouseDown={(event) =>
-          onResize(
-            nodeId,
-            "corner",
-            event
-          )
+      <button
+        type="button"
+        onClick={onGroup}
+        disabled={
+          selectedCount < 2
         }
-      />
+      >
+        Group
+      </button>
+
+      <button
+        type="button"
+        onClick={onUngroup}
+      >
+        Ungroup
+      </button>
+
+      <button
+        type="button"
+        onClick={onCopyStyle}
+      >
+        Copy style
+      </button>
+
+      <button
+        type="button"
+        onClick={onPasteStyle}
+        disabled={!canPasteStyle}
+      >
+        Paste style
+      </button>
+
+      <button
+        type="button"
+        className="danger"
+        onClick={onDelete}
+      >
+        Delete
+      </button>
     </div>
   );
 }
@@ -4499,220 +3200,245 @@ function Inspector({
   node,
   updateProp,
   updateStyle,
-  numericDraft,
-  setNumericDraft,
   uploadImage,
+  numericDrafts,
+  setNumericDrafts,
+  onAddColumn,
 }: {
   node: ComponentNode;
-
   updateProp: (
+    nodeId: string,
     key: string,
     value: unknown
   ) => void;
-
   updateStyle: (
+    nodeId: string,
     key: string,
     value: unknown
   ) => void;
-
-  numericDraft: Record<
+  uploadImage: (
+    nodeId: string
+  ) => void;
+  numericDrafts: Record<
     string,
     string
   >;
-
-  setNumericDraft: Dispatch<
+  setNumericDrafts: Dispatch<
     SetStateAction<
       Record<string, string>
     >
   >;
-
-  uploadImage: () => void;
+  onAddColumn: () => void;
 }) {
-  const number = (
+  const textProp = (
+    key: string,
+    fallback = ""
+  ) =>
+    getString(
+      node.props[key],
+      fallback
+    );
+
+  const numberControl = (
     key: string,
     fallback: number
   ) => {
-    const id = `${node.id}:${key}`;
+    const draftKey =
+      `${node.id}:${key}`;
 
     const committed =
-      px(
+      getNumber(
         node.styles?.[key],
         fallback
       );
 
     const value =
-      numericDraft[id] ??
-      String(committed);
+      numericDrafts[
+        draftKey
+      ] ?? String(committed);
 
     return (
-      <label>
-        <span>
-          {key}
-        </span>
+      <NumberField
+        key={key}
+        label={key}
+        value={value}
+        onChange={(text) => {
+          setNumericDrafts(
+            (current) => ({
+              ...current,
+              [draftKey]: text,
+            })
+          );
 
-        <input
-          value={value}
-          inputMode="decimal"
-          onChange={(event) => {
-            const text =
-              event.target
-                .value;
-
-            setNumericDraft(
-              (current) => ({
-                ...current,
-                [id]: text,
-              })
-            );
-
-            const parsed =
-              Number(text);
-
-            if (
-              text !== "" &&
-              Number.isFinite(
-                parsed
-              )
-            ) {
-              updateStyle(
-                key,
-                parsed
-              );
-            }
-          }}
-          onBlur={() =>
-            setNumericDraft(
-              (current) => {
-                const next = {
-                  ...current,
-                };
-
-                delete next[id];
-
-                return next;
-              }
-            )
+          if (text === "") {
+            return;
           }
-        />
-      </label>
+
+          const parsed =
+            Number(text);
+
+          if (
+            Number.isFinite(parsed)
+          ) {
+            updateStyle(
+              node.id,
+              key,
+              parsed
+            );
+          }
+        }}
+        onCommit={(text) => {
+          const parsed =
+            Number(text);
+
+          setNumericDrafts(
+            (current) => {
+              const next = {
+                ...current,
+              };
+
+              delete next[
+                draftKey
+              ];
+
+              return next;
+            }
+          );
+
+          if (
+            Number.isFinite(parsed)
+          ) {
+            updateStyle(
+              node.id,
+              key,
+              parsed
+            );
+          }
+        }}
+      />
     );
   };
 
-  const text = (
-    key: string,
-    fallback = ""
-  ) => (
-    <label>
-      <span>
-        {key}
-      </span>
-
-      <input
-        value={
-          typeof node.props[
-            key
-          ] === "string"
-            ? String(
-                node.props[
-                  key
-                ]
-              )
-            : fallback
-        }
-        onChange={(event) =>
-          updateProp(
-            key,
-            (
-              node.type ===
-                "menu" ||
-              node.type ===
-                "social"
-            ) &&
-            key === "items"
-              ? event.target.value
-                  .split(",")
-                  .map(
-                    (
-                      item
-                    ) =>
-                      item.trim()
-                  )
-                  .filter(
-                    Boolean
-                  )
-              : event.target
-                  .value
-          )
-        }
-      />
-    </label>
-  );
-
   return (
-    <aside className="inspector">
-      <header>
+    <aside className="floating-inspector">
+      <div className="inspector-header">
         <div>
           <strong>
-            {
-              info[
-                node.type
-              ][1]
-            }
+            {node.type}
           </strong>
-
-          <small>
-            Real component
-          </small>
+          <span>
+            Selected component
+          </span>
         </div>
-      </header>
+      </div>
 
-      <section>
-        <h3>
-          Content
-        </h3>
+      <InspectorSection title="Content">
+        {node.type ===
+          "heading" && (
+          <TextField
+            label="Text"
+            value={textProp(
+              "text"
+            )}
+            onChange={(value) =>
+              updateProp(
+                node.id,
+                "text",
+                value
+              )
+            }
+          />
+        )}
 
-        {(node.type ===
-          "heading" ||
-          node.type ===
-            "text") &&
-          text(
-            "text",
-            node.type ===
-              "heading"
-              ? "Heading"
-              : "Text"
-          )}
+        {node.type === "text" && (
+          <TextAreaField
+            label="Text"
+            value={textProp(
+              "text"
+            )}
+            onChange={(value) =>
+              updateProp(
+                node.id,
+                "text",
+                value
+              )
+            }
+          />
+        )}
 
         {node.type ===
           "button" && (
           <>
-            {text(
-              "text",
-              "Button"
-            )}
+            <TextField
+              label="Label"
+              value={textProp(
+                "text",
+                "Button"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "text",
+                  value
+                )
+              }
+            />
 
-            {text(
-              "linkTo",
-              "#"
-            )}
+            <TextField
+              label="Link"
+              value={textProp(
+                "linkTo",
+                "#"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "linkTo",
+                  value
+                )
+              }
+            />
           </>
         )}
 
-        {node.type ===
-          "image" && (
+        {node.type === "image" && (
           <>
-            {text("src")}
+            <TextField
+              label="Image URL"
+              value={textProp(
+                "src"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "src",
+                  value
+                )
+              }
+            />
 
-            {text(
-              "alt",
-              "Image"
-            )}
+            <TextField
+              label="Alt text"
+              value={textProp(
+                "alt",
+                "Image"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "alt",
+                  value
+                )
+              }
+            />
 
             <button
-              className="upload"
               type="button"
-              onClick={
-                uploadImage
+              className="upload-button"
+              onClick={() =>
+                uploadImage(
+                  node.id
+                )
               }
             >
               Upload image
@@ -4721,230 +3447,258 @@ function Inspector({
         )}
 
         {node.type ===
-          "gallery" && (
-          <>
-            <label>
-              <span>
-                Columns
-              </span>
-
-              <input
-                value={String(
-                  node.props
-                    .columns ??
-                    3
-                )}
-                onChange={(
-                  event
-                ) => {
-                  const value =
-                    Number(
-                      event.target
-                        .value
-                    );
-
-                  if (
-                    Number.isFinite(
-                      value
-                    )
-                  ) {
-                    updateProp(
-                      "columns",
-                      Math.max(
-                        1,
-                        Math.min(
-                          6,
-                          value
-                        )
-                      )
-                    );
-                  }
-                }}
-              />
-            </label>
-
-            <button
-              className="upload"
-              type="button"
-              onClick={
-                uploadImage
-              }
-            >
-              Upload images
-            </button>
-          </>
+          "video" && (
+          <TextField
+            label="Video URL"
+            value={textProp(
+              "src"
+            )}
+            onChange={(value) =>
+              updateProp(
+                node.id,
+                "src",
+                value
+              )
+            }
+          />
         )}
 
         {node.type ===
-          "video" &&
-          text("src")}
-
-        {node.type ===
-          "logo" &&
-          text(
-            "text",
-            "Sytely"
-          )}
-
-        {node.type ===
-          "icon" &&
-          text(
-            "icon",
-            "✦"
-          )}
-
-        {node.type ===
-          "menu" &&
-          text(
-            "items",
-            Array.isArray(
-              node.props
-                .items
-            )
-              ? node.props.items.join(
-                  ", "
-                )
-              : "Home, About, Contact"
-          )}
-
-        {node.type ===
-          "social" &&
-          text(
-            "items",
-            Array.isArray(
-              node.props
-                .items
-            )
-              ? node.props.items.join(
-                  ", "
-                )
-              : "Instagram, X, LinkedIn"
-          )}
-
-        {node.type ===
-          "form" && (
-          <>
-            {text(
-              "title",
-              "Contact us"
+          "logo" && (
+          <TextField
+            label="Logo"
+            value={textProp(
+              "text",
+              "Brand"
             )}
+            onChange={(value) =>
+              updateProp(
+                node.id,
+                "text",
+                value
+              )
+            }
+          />
+        )}
 
-            {text(
-              "submitLabel",
-              "Send message"
+        {node.type ===
+          "icon" && (
+          <TextField
+            label="Icon"
+            value={textProp(
+              "icon",
+              "✦"
             )}
-          </>
+            onChange={(value) =>
+              updateProp(
+                node.id,
+                "icon",
+                value
+              )
+            }
+          />
         )}
 
         {node.type ===
           "card" && (
           <>
-            {text(
-              "title",
-              "Card title"
-            )}
+            <TextField
+              label="Title"
+              value={textProp(
+                "title"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "title",
+                  value
+                )
+              }
+            />
 
-            {text(
-              "text",
-              "Description"
-            )}
+            <TextAreaField
+              label="Text"
+              value={textProp(
+                "text"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "text",
+                  value
+                )
+              }
+            />
           </>
         )}
 
         {node.type ===
           "testimonial" && (
           <>
-            {text(
-              "quote",
-              "Quote"
-            )}
+            <TextAreaField
+              label="Quote"
+              value={textProp(
+                "quote",
+                textProp(
+                  "text"
+                )
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "quote",
+                  value
+                )
+              }
+            />
 
-            {text(
-              "author",
-              "Customer"
-            )}
+            <TextField
+              label="Author"
+              value={textProp(
+                "author"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "author",
+                  value
+                )
+              }
+            />
           </>
         )}
 
         {node.type ===
           "faq" && (
           <>
-            {text(
-              "question",
-              "Question"
-            )}
+            <TextField
+              label="Question"
+              value={textProp(
+                "question"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "question",
+                  value
+                )
+              }
+            />
 
-            {text(
-              "answer",
-              "Answer"
-            )}
+            <TextAreaField
+              label="Answer"
+              value={textProp(
+                "answer"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "answer",
+                  value
+                )
+              }
+            />
           </>
         )}
 
         {node.type ===
           "contact" && (
           <>
-            {text(
-              "title",
-              "Contact"
-            )}
+            <TextField
+              label="Title"
+              value={textProp(
+                "title",
+                "Contact"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "title",
+                  value
+                )
+              }
+            />
 
-            {text(
-              "email",
-              "hello@example.com"
-            )}
+            <TextField
+              label="Email"
+              value={textProp(
+                "email"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "email",
+                  value
+                )
+              }
+            />
 
-            {text(
-              "phone",
-              "+1 000 000 0000"
-            )}
+            <TextField
+              label="Phone"
+              value={textProp(
+                "phone"
+              )}
+              onChange={(value) =>
+                updateProp(
+                  node.id,
+                  "phone",
+                  value
+                )
+              }
+            />
           </>
         )}
 
         {node.type ===
-          "footer" &&
-          text(
-            "text",
-            "Footer"
-          )}
-      </section>
+          "footer" && (
+          <TextAreaField
+            label="Text"
+            value={textProp(
+              "text"
+            )}
+            onChange={(value) =>
+              updateProp(
+                node.id,
+                "text",
+                value
+              )
+            }
+          />
+        )}
+      </InspectorSection>
 
-      <section>
-        <h3>
-          Layout
-        </h3>
-
-        {number(
+      <InspectorSection title="Layout">
+        {numberControl(
           "width",
           0
         )}
 
-        {number(
+        {numberControl(
           "maxWidth",
           0
         )}
 
-        {number(
+        {numberControl(
           "gap",
-          18
+          16
         )}
 
-        {number(
+        {numberControl(
           "paddingTop",
           0
         )}
 
-        {number(
+        {numberControl(
           "paddingRight",
           0
         )}
 
-        {number(
+        {numberControl(
           "paddingBottom",
           0
         )}
 
-        {number(
+        {numberControl(
           "paddingLeft",
           0
         )}
@@ -4955,207 +3709,486 @@ function Inspector({
             "features" ||
           node.type ===
             "pricing") && (
-          <label>
-            <span>
-              Columns
-            </span>
-
-            <select
-              value={
-                typeof node
-                  .props
-                  .columns ===
-                "number"
-                  ? String(
-                      node
-                        .props
-                        .columns
-                    )
-                  : ""
-              }
-              onChange={(
-                event
-              ) => {
-                const count =
-                  Number(
-                    event.target
-                      .value
-                  );
-
-                if (
-                  !Number.isFinite(
-                    count
-                  )
-                ) {
-                  return;
-                }
-
-                updateProp(
-                  "columns",
-                  count
-                );
-
+          <>
+            <SelectField
+              label="Columns"
+              value={getString(
+                node.styles
+                  ?.gridTemplateColumns,
+                "1fr"
+              )}
+              options={[
+                [
+                  "1fr",
+                  "1 column",
+                ],
+                [
+                  "repeat(2,minmax(0,1fr))",
+                  "2 columns",
+                ],
+                [
+                  "repeat(3,minmax(0,1fr))",
+                  "3 columns",
+                ],
+                [
+                  "repeat(4,minmax(0,1fr))",
+                  "4 columns",
+                ],
+              ]}
+              onChange={(value) => {
                 updateStyle(
+                  node.id,
                   "display",
                   "grid"
                 );
-
                 updateStyle(
+                  node.id,
                   "gridTemplateColumns",
-                  `repeat(${count},minmax(0,1fr))`
+                  value
                 );
               }}
+            />
+
+            <button
+              type="button"
+              className="upload-button"
+              onClick={onAddColumn}
             >
-              <option value="">
-                Auto
-              </option>
-
-              {[
-                1,
-                2,
-                3,
-                4,
-                5,
-                6,
-              ].map(
-                (count) => (
-                  <option
-                    key={
-                      count
-                    }
-                    value={
-                      count
-                    }
-                  >
-                    {count}
-                  </option>
-                )
-              )}
-            </select>
-          </label>
+              Add column
+            </button>
+          </>
         )}
-      </section>
+      </InspectorSection>
 
-      <section>
-        <h3>
-          Typography
-        </h3>
-
-        {number(
+      <InspectorSection title="Typography">
+        {numberControl(
           "fontSize",
           16
         )}
 
-        {number(
+        {numberControl(
           "fontWeight",
           400
         )}
 
-        {number(
+        {numberControl(
           "lineHeight",
           1.5
         )}
 
-        <label>
-          <span>
-            Align
-          </span>
+        <SelectField
+          label="Alignment"
+          value={getString(
+            node.styles
+              ?.textAlign,
+            "left"
+          )}
+          options={[
+            ["left", "Left"],
+            [
+              "center",
+              "Center",
+            ],
+            [
+              "right",
+              "Right",
+            ],
+          ]}
+          onChange={(value) =>
+            updateStyle(
+              node.id,
+              "textAlign",
+              value
+            )
+          }
+        />
+      </InspectorSection>
 
-          <select
-            value={String(
-              node.styles
-                ?.textAlign ??
-                "left"
-            )}
-            onChange={(event) =>
-              updateStyle(
-                "textAlign",
-                event.target
-                  .value
-              )
-            }
-          >
-            <option>
-              left
-            </option>
+      <InspectorSection title="Appearance">
+        <TextField
+          label="Background"
+          value={getString(
+            node.styles
+              ?.background
+          )}
+          onChange={(value) =>
+            updateStyle(
+              node.id,
+              "background",
+              value
+            )
+          }
+        />
 
-            <option>
-              center
-            </option>
-
-            <option>
-              right
-            </option>
-          </select>
-        </label>
-      </section>
-
-      <section>
-        <h3>
-          Appearance
-        </h3>
-
-        <label>
-          <span>
-            Background
-          </span>
-
-          <input
-            value={
-              typeof node
-                .styles
-                ?.background ===
-              "string"
-                ? String(
-                    node
-                      .styles
-                      .background
-                  )
-                : ""
-            }
-            onChange={(event) =>
-              updateStyle(
-                "background",
-                event.target
-                  .value
-              )
-            }
-          />
-        </label>
-
-        <label>
-          <span>
-            Color
-          </span>
-
-          <input
-            value={
-              typeof node
-                .styles
-                ?.color ===
-              "string"
-                ? String(
-                    node
-                      .styles
-                      .color
-                  )
-                : ""
-            }
-            onChange={(event) =>
-              updateStyle(
-                "color",
-                event.target
-                  .value
-              )
-            }
-          />
-        </label>
-
-        {number(
+        {numberControl(
           "borderRadius",
           0
         )}
-      </section>
+
+        <TextField
+          label="Color"
+          value={getString(
+            node.styles?.color
+          )}
+          onChange={(value) =>
+            updateStyle(
+              node.id,
+              "color",
+              value
+            )
+          }
+        />
+      </InspectorSection>
     </aside>
+  );
+}
+
+function PageInspector({
+  page,
+  updatePage,
+}: {
+  page: SitePage;
+  updatePage: (
+    updater: (
+      page: SitePage
+    ) => SitePage
+  ) => void;
+}) {
+  return (
+    <aside className="floating-inspector">
+      <div className="inspector-header">
+        <div>
+          <strong>Page</strong>
+          <span>
+            {page.name}
+          </span>
+        </div>
+      </div>
+
+      <InspectorSection title="Margins">
+        <NumberField
+          label="Top"
+          value={String(
+            page.margins.top
+          )}
+          onChange={(text) => {
+            const value =
+              Number(text);
+
+            if (
+              Number.isFinite(value)
+            ) {
+              updatePage(
+                (current) => ({
+                  ...current,
+                  margins: {
+                    ...current.margins,
+                    top: value,
+                  },
+                })
+              );
+            }
+          }}
+        />
+
+        <NumberField
+          label="Right"
+          value={String(
+            page.margins.right
+          )}
+          onChange={(text) => {
+            const value =
+              Number(text);
+
+            if (
+              Number.isFinite(value)
+            ) {
+              updatePage(
+                (current) => ({
+                  ...current,
+                  margins: {
+                    ...current.margins,
+                    right: value,
+                  },
+                })
+              );
+            }
+          }}
+        />
+
+        <NumberField
+          label="Bottom"
+          value={String(
+            page.margins.bottom
+          )}
+          onChange={(text) => {
+            const value =
+              Number(text);
+
+            if (
+              Number.isFinite(value)
+            ) {
+              updatePage(
+                (current) => ({
+                  ...current,
+                  margins: {
+                    ...current.margins,
+                    bottom: value,
+                  },
+                })
+              );
+            }
+          }}
+        />
+
+        <NumberField
+          label="Left"
+          value={String(
+            page.margins.left
+          )}
+          onChange={(text) => {
+            const value =
+              Number(text);
+
+            if (
+              Number.isFinite(value)
+            ) {
+              updatePage(
+                (current) => ({
+                  ...current,
+                  margins: {
+                    ...current.margins,
+                    left: value,
+                  },
+                })
+              );
+            }
+          }}
+        />
+      </InspectorSection>
+    </aside>
+  );
+}
+
+function InspectorSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="inspector-section">
+      <h3>{title}</h3>
+      <div className="inspector-fields">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (
+    value: string
+  ) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(event) =>
+          onChange(
+            event.target.value
+          )
+        }
+      />
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (
+    value: string
+  ) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <textarea
+        rows={4}
+        value={value}
+        onChange={(event) =>
+          onChange(
+            event.target.value
+          )
+        }
+      />
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  onChange: (
+    value: string
+  ) => void;
+  onCommit?: (
+    value: string
+  ) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(event) =>
+          onChange(
+            event.target.value
+          )
+        }
+        onBlur={(event) =>
+          onCommit?.(
+            event.target.value
+          )
+        }
+      />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<
+    [string, string]
+  >;
+  onChange: (
+    value: string
+  ) => void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select
+        value={value}
+        onChange={(event) =>
+          onChange(
+            event.target.value
+          )
+        }
+      >
+        {options.map(
+          ([option, label]) => (
+            <option
+              key={option}
+              value={option}
+            >
+              {label}
+            </option>
+          )
+        )}
+      </select>
+    </label>
+  );
+}
+
+function LayerTree({
+  nodes,
+  selectedIds,
+  onSelect,
+  depth = 0,
+}: {
+  nodes: ComponentNode[];
+  selectedIds: string[];
+  onSelect: (
+    id: string
+  ) => void;
+  depth?: number;
+}) {
+  return (
+    <div>
+      {nodes.map((node) => (
+        <div key={node.id}>
+          <button
+            type="button"
+            className={
+              selectedIds.includes(
+                node.id
+              )
+                ? "layer-row active"
+                : "layer-row"
+            }
+            style={{
+              paddingLeft:
+                10 +
+                depth * 14,
+            }}
+            onClick={() =>
+              onSelect(
+                node.id
+              )
+            }
+          >
+            <span>
+              {
+                COMPONENTS.find(
+                  (item) =>
+                    item.type ===
+                    node.type
+                )?.icon
+              }
+            </span>
+            <strong>
+              {node.type}
+            </strong>
+          </button>
+
+          {node.children
+            ?.length ? (
+            <LayerTree
+              nodes={
+                node.children
+              }
+              selectedIds={
+                selectedIds
+              }
+              onSelect={
+                onSelect
+              }
+              depth={
+                depth + 1
+              }
+            />
+          ) : null}
+        </div>
+      ))}
+    </div>
   );
 }
