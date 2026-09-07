@@ -1,9 +1,50 @@
-export const COMPONENT_TYPES = [
+import type { ComponentType } from "@sytely/types";
+
+export const COMPONENT_TYPES: ComponentType[] = [
   "section",
   "heading",
   "text",
+  "button",
   "image",
-  "button"
-] as const;
+  "video",
+  "gallery",
+  "divider",
+  "icon",
+  "logo",
+  "menu",
+  "social",
+  "form",
+  "card",
+  "features",
+  "pricing",
+  "testimonial",
+  "faq",
+  "contact",
+  "footer",
+];
 
-export type ComponentPaletteType = (typeof COMPONENT_TYPES)[number];
+export const COMPONENT_LABELS: Record<
+  ComponentType,
+  string
+> = {
+  section: "Section",
+  heading: "Heading",
+  text: "Text",
+  button: "Button",
+  image: "Image",
+  video: "Video",
+  gallery: "Gallery",
+  divider: "Divider",
+  icon: "Icon",
+  logo: "Logo",
+  menu: "Menu",
+  social: "Social",
+  form: "Form",
+  card: "Card",
+  features: "Features",
+  pricing: "Pricing",
+  testimonial: "Testimonial",
+  faq: "FAQ",
+  contact: "Contact",
+  footer: "Footer",
+};

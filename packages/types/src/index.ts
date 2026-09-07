@@ -20,9 +20,13 @@ export type ComponentType =
   | "contact"
   | "footer";
 
-export type SiteTheme = "system" | "light" | "dark";
+export type SiteTheme =
+  | "system"
+  | "light"
+  | "dark";
 
-export type NodeStyles = Record<string, unknown>;
+export type NodeStyles =
+  Record<string, unknown>;
 
 export interface ComponentNode {
   id: string;
@@ -51,6 +55,7 @@ export interface SitePage {
 export interface Site {
   id: string;
   name: string;
+  slug?: string;
   version: number;
   theme: SiteTheme;
   pages: SitePage[];

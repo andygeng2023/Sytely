@@ -1,19 +1,23 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Sytely",
-  description: "Build websites without code."
+  description:
+    "Build websites without code.",
 };
 
 export default function RootLayout({
-  children
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+  children,
+}: {
+  children: ReactNode;
+}) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+      </body>
     </html>
   );
 }

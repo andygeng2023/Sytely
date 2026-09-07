@@ -1,10 +1,13 @@
 import {
-  Fragment,
   createElement,
+  Fragment,
   type CSSProperties,
-  type ReactNode
+  type ReactNode,
 } from "react";
-import type { ComponentNode } from "@sytely/types";
+
+import type {
+  ComponentNode,
+} from "@sytely/types";
 
 export type RenderDevice =
   | "desktop"
@@ -12,215 +15,202 @@ export type RenderDevice =
   | "mobile";
 
 export interface RenderOptions {
+  device?: RenderDevice;
   children?: ReactNode;
   renderChildren?: boolean;
-  device?: RenderDevice;
 }
+
+type AnyStyle =
+  Record<string, unknown>;
 
 function getString(
   props: Record<string, unknown>,
   key: string,
   fallback = ""
 ) {
-  const value = props[key];
-
-  return typeof value === "string"
-    ? value
+  return typeof props[key] === "string"
+    ? (props[key] as string)
     : fallback;
 }
 
-function responsiveStyles(
-  node: ComponentNode,
-  device: RenderDevice
-): CSSProperties {
-  const base = {
-    ...(node.styles ?? {})
-  } as Record<
-    string,
-    unknown
-  >;
-
-  const responsive =
-    base.responsive as
-      | Record<
-          string,
-          unknown
-        >
-      | undefined;
-
-  delete base.responsive;
-
-  const tablet =
-    (responsive?.tablet as
-      | Record<
-          string,
-          unknown
-        >
-      | undefined) ??
-    {};
-
-  const mobile =
-    (responsive?.mobile as
-      | Record<
-          string,
-          unknown
-        >
-      | undefined) ??
-    {};
-
-  const override =
-    device === "mobile"
-      ? {
-          ...tablet,
-          ...mobile
-        }
-      : device ===
-          "tablet"
-        ? tablet
-        : {};
-
-  const result = {
-    ...base,
-    ...override
-  } as CSSProperties;
-
+function getNumber(
+  value: unknown,
+  fallback: number
+) {
   if (
-    device !== "desktop" &&
-    typeof result.fontSize ===
-      "number"
+    typeof value === "number" &&
+    Number.isFinite(value)
   ) {
-    result.fontSize =
-      Math.max(
-        12,
-        result.fontSize *
-          (device === "mobile"
-            ? 0.72
-            : 0.88)
-      );
+    return value;
   }
 
-  if (
-    device !== "desktop" &&
-    typeof result.gap ===
-      "number"
-  ) {
-    result.gap =
-      Math.max(
-        8,
-        result.gap *
-          (device === "mobile"
-            ? 0.75
-            : 0.9)
-      );
-  }
+  if (typeof value === "string") {
+    const parsed = Number(value);
 
-  if (
-    typeof result.width ===
-    "number"
-  ) {
-    result.width = `min(${result.width}px, 100%)`;
-  }
-
-  if (
-    typeof result.maxWidth ===
-    "number"
-  ) {
-    result.maxWidth = `min(${result.maxWidth}px, 100%)`;
-  }
-
-  if (
-    device === "tablet" &&
-    typeof result.gridTemplateColumns ===
-      "string" &&
-    result.gridTemplateColumns.includes(
-      "repeat(3"
-    )
-  ) {
-    result.gridTemplateColumns =
-      "repeat(2,minmax(0,1fr))";
-  }
-
-  if (device === "mobile") {
-    if (
-      typeof result.gridTemplateColumns ===
-        "string" &&
-      result.gridTemplateColumns.includes(
-        "repeat("
-      )
-    ) {
-      result.gridTemplateColumns =
-        "1fr";
-    }
-
-    if (
-      result.flexDirection ===
-      "row"
-    ) {
-      result.flexDirection =
-        "column";
+    if (Number.isFinite(parsed)) {
+      return parsed;
     }
   }
 
-  return result;
-}
-
-function renderChildren(
-  children:
-    | ComponentNode[]
-    | undefined,
-  device: RenderDevice
-) {
-  return (
-    children ?? []
-  ).map((child) =>
-    createElement(
-      Fragment,
-      {
-        key: child.id
-      },
-      renderNode(child, {
-        device
-      })
-    )
-  );
-}
-
-function wrapLink(
-  node: ComponentNode,
-  content: ReactNode
-) {
-  const linkTo =
-    getString(
-      node.props,
-      "linkTo"
-    );
-
-  return linkTo
-    ? createElement(
-        "a",
-        {
-          href: linkTo,
-          style: {
-            color:
-              "inherit",
-            textDecoration:
-              "none"
-          }
-        },
-        content
-      )
-    : content;
+  return fallback;
 }
 
 function data(
   node: ComponentNode
 ) {
   return {
-    "data-sytely-id":
-      node.id,
-    "data-sytely-type":
-      node.type
+    "data-sytely-id": node.id,
+    "data-sytely-type": node.type,
   };
+}
+
+function responsiveStyles(
+  node: ComponentNode,
+  device: RenderDevice
+): CSSProperties {
+  const base: AnyStyle = {
+    ...(node.styles ?? {}),
+  };
+
+  const responsive =
+    (base.responsive ?? {}) as AnyStyle;
+
+  delete base.responsive;
+
+  const tablet =
+    (responsive.tablet ?? {}) as AnyStyle;
+
+  const mobile =
+    (responsive.mobile ?? {}) as AnyStyle;
+
+  const override =
+    device === "tablet"
+      ? tablet
+      : device === "mobile"
+        ? {
+            ...tablet,
+            ...mobile,
+          }
+        : {};
+
+  const result: AnyStyle = {
+    ...base,
+    ...override,
+  };
+
+  if (
+    typeof result.width === "number"
+  ) {
+    result.width =
+      `min(${result.width}px,100%)`;
+  }
+
+  if (
+    typeof result.maxWidth === "number"
+  ) {
+    result.maxWidth =
+      `min(${result.maxWidth}px,100%)`;
+  }
+
+  if (
+    typeof result.fontSize === "number" &&
+    device !== "desktop"
+  ) {
+    result.fontSize = Math.max(
+      10,
+      result.fontSize *
+        (device === "mobile"
+          ? 0.72
+          : 0.88)
+    );
+  }
+
+  if (
+    typeof result.gap === "number" &&
+    device !== "desktop"
+  ) {
+    result.gap = Math.max(
+      6,
+      result.gap *
+        (device === "mobile"
+          ? 0.75
+          : 0.9)
+    );
+  }
+
+  const gridColumns =
+    result.gridTemplateColumns;
+
+  if (
+    typeof gridColumns === "string"
+  ) {
+    if (
+      device === "tablet" &&
+      gridColumns.includes("repeat(3")
+    ) {
+      result.gridTemplateColumns =
+        "repeat(2,minmax(0,1fr))";
+    }
+
+    if (
+      device === "mobile" &&
+      gridColumns.includes("repeat(")
+    ) {
+      result.gridTemplateColumns =
+        "1fr";
+    }
+  }
+
+  if (
+    device === "mobile" &&
+    result.flexDirection === "row"
+  ) {
+    result.flexDirection = "column";
+  }
+
+  return result as CSSProperties;
+}
+
+function renderChildren(
+  children: ComponentNode[] | undefined,
+  device: RenderDevice
+): ReactNode {
+  return (children ?? []).map(
+    (child) =>
+      createElement(
+        Fragment,
+        {
+          key: child.id,
+        },
+        renderNode(child, {
+          device,
+        })
+      )
+  );
+}
+
+function renderCompositeChildren(
+  node: ComponentNode,
+  device: RenderDevice,
+  fallback: ComponentNode[]
+): ReactNode {
+  const children =
+    node.children?.length
+      ? node.children
+      : fallback;
+
+  return children.map(
+    (child) =>
+      createElement(
+        Fragment,
+        {
+          key: child.id,
+        },
+        renderNode(child, {
+          device,
+        })
+      )
+  );
 }
 
 export function renderNode(
@@ -228,8 +218,7 @@ export function renderNode(
   options: RenderOptions = {}
 ): ReactNode {
   const device =
-    options.device ??
-    "desktop";
+    options.device ?? "desktop";
 
   const props =
     node.props ?? {};
@@ -241,129 +230,65 @@ export function renderNode(
     );
 
   const children =
-    options.children !==
-    undefined
+    options.children !== undefined
       ? options.children
-      : options.renderChildren ===
-          false
+      : options.renderChildren === false
         ? null
         : renderChildren(
             node.children,
             device
           );
 
+  const linked = (
+    content: ReactNode
+  ) =>
+    getString(props, "linkTo")
+      ? createElement(
+          "a",
+          {
+            href: getString(
+              props,
+              "linkTo"
+            ),
+            style: {
+              color: "inherit",
+              textDecoration:
+                "none",
+            },
+          },
+          content
+        )
+      : content;
+
   switch (node.type) {
-    case "section": {
-      const sectionStyles:
-        CSSProperties = {
-        boxSizing:
-          "border-box",
-        width: "100%",
-        display: "flex",
-        flexDirection:
-          "column",
-        justifyContent:
-          "flex-start",
-        alignItems:
-          "stretch",
-        gap: 24,
-        paddingTop: 56,
-        paddingRight: 40,
-        paddingBottom: 56,
-        paddingLeft: 40,
-        color:
-          "var(--sytely-text)",
-        background:
-          "var(--sytely-surface)",
-        ...styles
-      };
-
-      if (
-        device === "tablet"
-      ) {
-        sectionStyles.paddingTop =
-          Math.min(
-            Number(
-              sectionStyles.paddingTop
-            ) || 56,
-            48
-          );
-
-        sectionStyles.paddingBottom =
-          Math.min(
-            Number(
-              sectionStyles.paddingBottom
-            ) || 56,
-            48
-          );
-
-        sectionStyles.paddingLeft =
-          Math.min(
-            Number(
-              sectionStyles.paddingLeft
-            ) || 40,
-            32
-          );
-
-        sectionStyles.paddingRight =
-          Math.min(
-            Number(
-              sectionStyles.paddingRight
-            ) || 40,
-            32
-          );
-      }
-
-      if (
-        device === "mobile"
-      ) {
-        sectionStyles.paddingTop =
-          Math.min(
-            Number(
-              sectionStyles.paddingTop
-            ) || 56,
-            32
-          );
-
-        sectionStyles.paddingBottom =
-          Math.min(
-            Number(
-              sectionStyles.paddingBottom
-            ) || 56,
-            32
-          );
-
-        sectionStyles.paddingLeft =
-          Math.min(
-            Number(
-              sectionStyles.paddingLeft
-            ) || 40,
-            20
-          );
-
-        sectionStyles.paddingRight =
-          Math.min(
-            Number(
-              sectionStyles.paddingRight
-            ) || 40,
-            20
-          );
-      }
-
+    case "section":
       return createElement(
         "section",
         {
           ...data(node),
-          style:
-            sectionStyles
+          style: {
+            boxSizing: "border-box",
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent:
+              "flex-start",
+            alignItems: "stretch",
+            gap: 24,
+            padding:
+              "56px 40px",
+            color:
+              "var(--sytely-text)",
+            background:
+              "var(--sytely-surface)",
+            ...styles,
+          },
         },
         children
       );
-    }
 
     case "heading":
-      return wrapLink(
-        node,
+      return linked(
         createElement(
           "h2",
           {
@@ -372,9 +297,9 @@ export function renderNode(
               margin: 0,
               color:
                 "var(--sytely-text)",
-              lineHeight: 1.12,
-              ...styles
-            }
+              lineHeight: 1.1,
+              ...styles,
+            },
           },
           getString(
             props,
@@ -385,8 +310,7 @@ export function renderNode(
       );
 
     case "text":
-      return wrapLink(
-        node,
+      return linked(
         createElement(
           "p",
           {
@@ -396,14 +320,55 @@ export function renderNode(
               lineHeight: 1.6,
               color:
                 "var(--sytely-text-muted)",
-              ...styles
-            }
+              ...styles,
+            },
           },
           getString(
             props,
             "text",
             "Text"
           )
+        )
+      );
+
+    case "button":
+      return createElement(
+        "a",
+        {
+          ...data(node),
+          href: getString(
+            props,
+            "linkTo",
+            "#"
+          ),
+          style: {
+            display:
+              "inline-flex",
+            alignItems:
+              "center",
+            justifyContent:
+              "center",
+            width: "fit-content",
+            minHeight: 44,
+            padding:
+              "12px 20px",
+            border: 0,
+            borderRadius: 9,
+            background:
+              "var(--sytely-accent)",
+            color:
+              "var(--sytely-accent-text)",
+            textDecoration:
+              "none",
+            boxSizing:
+              "border-box",
+            ...styles,
+          },
+        },
+        getString(
+          props,
+          "text",
+          "Button"
         )
       );
 
@@ -414,13 +379,6 @@ export function renderNode(
           "src"
         );
 
-      const alt =
-        getString(
-          props,
-          "alt",
-          "Image"
-        );
-
       if (!src) {
         return createElement(
           "div",
@@ -428,19 +386,17 @@ export function renderNode(
             ...data(node),
             style: {
               width: "100%",
-              minHeight: 180,
-              aspectRatio:
-                "16 / 9",
-              background:
-                "repeating-linear-gradient(45deg,var(--sytely-placeholder-a) 0,var(--sytely-placeholder-a) 8px,var(--sytely-placeholder-b) 8px,var(--sytely-placeholder-b) 16px)",
+              minHeight: 200,
               display: "grid",
               placeItems:
                 "center",
+              borderRadius: 12,
+              background:
+                "var(--sytely-placeholder)",
               color:
                 "var(--sytely-text-muted)",
-              borderRadius: 10,
-              ...styles
-            }
+              ...styles,
+            },
           },
           "Image"
         );
@@ -451,90 +407,25 @@ export function renderNode(
         {
           ...data(node),
           src,
-          alt,
+          alt: getString(
+            props,
+            "alt",
+            "Image"
+          ),
           style: {
             display: "block",
             width: "100%",
             maxWidth: "100%",
             height: "auto",
             objectFit: "cover",
-            borderRadius: 10,
-            ...styles
-          }
+            borderRadius: 12,
+            ...styles,
+          },
         }
       );
     }
 
-    case "button": {
-      const text =
-        getString(
-          props,
-          "text",
-          "Button"
-        );
-
-      const buttonStyle:
-        CSSProperties = {
-        display:
-          "inline-flex",
-        alignItems:
-          "center",
-        justifyContent:
-          "center",
-        width: "fit-content",
-        minHeight: 44,
-        padding:
-          "12px 20px",
-        border: "none",
-        borderRadius: 8,
-        cursor: "pointer",
-        textDecoration:
-          "none",
-        background:
-          "var(--sytely-accent)",
-        color:
-          "var(--sytely-accent-text)",
-        boxSizing:
-          "border-box",
-        ...styles
-      };
-
-      return getString(
-        props,
-        "linkTo"
-      )
-        ? createElement(
-            "a",
-            {
-              ...data(node),
-              href: getString(
-                props,
-                "linkTo"
-              ),
-              style:
-                buttonStyle
-            },
-            text
-          )
-        : createElement(
-            "button",
-            {
-              ...data(node),
-              type: "button",
-              style:
-                buttonStyle
-            },
-            text
-          );
-    }
-
-    case "video": {
-      const src =
-        getString(
-          props,
-          "src"
-        );
-
+    case "video":
       return createElement(
         "div",
         {
@@ -543,34 +434,34 @@ export function renderNode(
             width: "100%",
             aspectRatio:
               "16 / 9",
-            borderRadius: 12,
             overflow:
               "hidden",
+            borderRadius: 12,
             background:
               "var(--sytely-card)",
             display: "grid",
             placeItems:
               "center",
-            color:
-              "var(--sytely-text-muted)",
-            ...styles
-          }
+            ...styles,
+          },
         },
-        src
+        getString(props, "src")
           ? createElement(
               "video",
               {
-                src,
+                src: getString(
+                  props,
+                  "src"
+                ),
                 controls: true,
                 style: {
                   width: "100%",
-                  height: "100%"
-                }
+                  height: "100%",
+                },
               }
             )
           : "Video"
       );
-    }
 
     case "gallery": {
       const images =
@@ -584,11 +475,24 @@ export function renderNode(
                 typeof value ===
                 "string"
             )
-          : [
-              "",
-              "",
-              ""
-            ];
+          : [];
+
+      const list =
+        images.length
+          ? images
+          : ["", "", ""];
+
+      const columns =
+        Math.max(
+          1,
+          Math.min(
+            6,
+            getNumber(
+              props.columns,
+              3
+            )
+          )
+        );
 
       return createElement(
         "div",
@@ -597,34 +501,22 @@ export function renderNode(
           style: {
             display: "grid",
             gridTemplateColumns:
-              "repeat(3,minmax(0,1fr))",
+              `repeat(${columns},minmax(0,1fr))`,
             gap: 12,
             width: "100%",
-            ...styles
-          }
+            ...styles,
+          },
         },
-        (
-          images.length
-            ? images
-            : [
-                "",
-                "",
-                ""
-              ]
-        ).map(
-          (
-            src,
-            index
-          ) =>
+        list.map(
+          (src, index) =>
             src
               ? createElement(
                   "img",
                   {
                     key: index,
                     src,
-                    alt: `Gallery image ${
-                      index + 1
-                    }`,
+                    alt:
+                      `Gallery image ${index + 1}`,
                     style: {
                       width:
                         "100%",
@@ -632,8 +524,8 @@ export function renderNode(
                         "1",
                       objectFit:
                         "cover",
-                      borderRadius: 8
-                    }
+                      borderRadius: 9,
+                    },
                   }
                 )
               : createElement(
@@ -643,10 +535,10 @@ export function renderNode(
                     style: {
                       aspectRatio:
                         "1",
-                      borderRadius: 8,
+                      borderRadius: 9,
                       background:
-                        "var(--sytely-card)"
-                    }
+                        "var(--sytely-card)",
+                    },
                   }
                 )
         )
@@ -662,10 +554,10 @@ export function renderNode(
             width: "100%",
             height: 1,
             background:
-              "var(--sytely-text)",
-            opacity: 0.15,
-            ...styles
-          }
+              "currentColor",
+            opacity: 0.16,
+            ...styles,
+          },
         }
       );
 
@@ -677,8 +569,8 @@ export function renderNode(
           style: {
             fontSize: 40,
             lineHeight: 1,
-            ...styles
-          }
+            ...styles,
+          },
         },
         getString(
           props,
@@ -693,36 +585,19 @@ export function renderNode(
         {
           ...data(node),
           style: {
-            fontWeight: 800,
             fontSize: 22,
-            ...styles
-          }
+            fontWeight: 750,
+            ...styles,
+          },
         },
         getString(
           props,
           "text",
-          "Brand"
+          "Logo"
         )
       );
 
-    case "menu": {
-      const items =
-        Array.isArray(
-          props.items
-        )
-          ? props.items.filter(
-              (
-                value
-              ): value is string =>
-                typeof value ===
-                "string"
-            )
-          : [
-              "Home",
-              "About",
-              "Contact"
-            ];
-
+    case "menu":
       return createElement(
         "nav",
         {
@@ -730,31 +605,38 @@ export function renderNode(
           style: {
             display: "flex",
             flexWrap: "wrap",
-            gap: 18,
-            alignItems:
-              "center",
-            ...styles
-          }
+            gap: 20,
+            ...styles,
+          },
         },
-        items.map(
-          (item) =>
+        (
+          Array.isArray(
+            props.items
+          )
+            ? props.items
+            : [
+                "Home",
+                "About",
+                "Contact",
+              ]
+        ).map(
+          (item, index) =>
             createElement(
               "a",
               {
-                key: item,
+                key: index,
                 href: "#",
                 style: {
                   color:
                     "inherit",
                   textDecoration:
-                    "none"
-                }
+                    "none",
+                },
               },
-              item
+              String(item)
             )
         )
       );
-    }
 
     case "social":
       return createElement(
@@ -763,35 +645,42 @@ export function renderNode(
           ...data(node),
           style: {
             display: "flex",
-            gap: 10,
             flexWrap: "wrap",
-            ...styles
-          }
+            gap: 10,
+            ...styles,
+          },
         },
-        [
-          "in",
-          "𝕏",
-          "◎",
-          "f"
-        ].map((item) =>
-          createElement(
-            "span",
-            {
-              key: item,
-              style: {
-                width: 34,
-                height: 34,
-                borderRadius: 50,
-                display: "grid",
-                placeItems:
-                  "center",
-                background:
-                  "var(--sytely-card)",
-                fontWeight: 700
-              }
-            },
-            item
+        (
+          Array.isArray(
+            props.items
           )
+            ? props.items
+            : [
+                "Instagram",
+                "X",
+                "LinkedIn",
+              ]
+        ).map(
+          (item, index) =>
+            createElement(
+              "a",
+              {
+                key: index,
+                href: "#",
+                style: {
+                  padding:
+                    "8px 11px",
+                  borderRadius: 8,
+                  background:
+                    "var(--sytely-card)",
+                  color:
+                    "inherit",
+                  textDecoration:
+                    "none",
+                },
+              },
+              String(item)
+            )
         )
       );
 
@@ -801,58 +690,51 @@ export function renderNode(
         {
           ...data(node),
           onSubmit: (
-            event: {
-              preventDefault: () => void;
-            }
-          ) =>
-            event.preventDefault(),
+            event: any
+          ) => event.preventDefault(),
           style: {
             display: "grid",
             gap: 12,
-            width: "100%",
             maxWidth: 560,
-            ...styles
-          }
+            ...styles,
+          },
         },
-        [
-          "Name",
-          "Email"
-        ].map(
+        createElement(
+          "h3",
+          { style: { margin: 0 } },
+          getString(
+            props,
+            "title",
+            "Contact us"
+          )
+        ),
+        ["Name", "Email"].map(
           (label) =>
             createElement(
-              "label",
+              "input",
               {
                 key: label,
+                type:
+                  label === "Email"
+                    ? "email"
+                    : "text",
+                placeholder:
+                  label,
                 style: {
-                  display:
-                    "grid",
-                  gap: 6
-                }
-              },
-              label,
-              createElement(
-                "input",
-                {
-                  type:
-                    label ===
-                    "Email"
-                      ? "email"
-                      : "text",
-                  placeholder:
-                    label,
-                  style: {
-                    padding:
-                      "12px 14px",
-                    borderRadius: 8,
-                    border:
-                      "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
-                    background:
-                      "var(--sytely-page)",
-                    color:
-                      "inherit"
-                  }
-                }
-              )
+                  width: "100%",
+                  boxSizing:
+                    "border-box",
+                  padding:
+                    "12px 14px",
+                  borderRadius: 8,
+                  border:
+                    "1px solid color-mix(in srgb,var(--sytely-text) 15%,transparent)",
+                  background:
+                    "var(--sytely-page)",
+                  color:
+                    "inherit",
+                },
+              }
             )
         ),
         createElement(
@@ -862,6 +744,9 @@ export function renderNode(
               "Message",
             rows: 4,
             style: {
+              width: "100%",
+              boxSizing:
+                "border-box",
               padding:
                 "12px 14px",
               borderRadius: 8,
@@ -870,8 +755,8 @@ export function renderNode(
               background:
                 "var(--sytely-page)",
               color:
-                "inherit"
-            }
+                "inherit",
+            },
           }
         ),
         createElement(
@@ -879,6 +764,8 @@ export function renderNode(
           {
             type: "submit",
             style: {
+              width:
+                "fit-content",
               padding:
                 "12px 18px",
               border: 0,
@@ -886,10 +773,14 @@ export function renderNode(
               background:
                 "var(--sytely-accent)",
               color:
-                "var(--sytely-accent-text)"
-            }
+                "var(--sytely-accent-text)",
+            },
           },
-          "Send message"
+          getString(
+            props,
+            "submitLabel",
+            "Send message"
+          )
         )
       );
 
@@ -900,85 +791,49 @@ export function renderNode(
           ...data(node),
           style: {
             padding: 24,
-            borderRadius: 12,
+            borderRadius: 14,
             background:
               "var(--sytely-card)",
             display: "grid",
             gap: 10,
-            ...styles
-          }
-        },
-        createElement(
-          "strong",
-          null,
-          getString(
-            props,
-            "title",
-            "Card title"
-          )
-        ),
-        createElement(
-          "p",
-          {
-            style: {
-              margin: 0,
-              color:
-                "var(--sytely-text-muted)",
-              lineHeight: 1.6
-            }
+            ...styles,
           },
-          getString(
-            props,
-            "text",
-            "Card description"
-          )
-        )
+        },
+        node.children?.length
+          ? children
+          : createElement(
+              Fragment,
+              null,
+              createElement(
+                "strong",
+                null,
+                getString(
+                  props,
+                  "title",
+                  "Card title"
+                )
+              ),
+              createElement(
+                "p",
+                {
+                  style: {
+                    margin: 0,
+                    color:
+                      "var(--sytely-text-muted)",
+                    lineHeight:
+                      1.6,
+                  },
+                },
+                getString(
+                  props,
+                  "text",
+                  "Card description"
+                )
+              )
+            )
       );
 
-    case "features": {
-      if (
-        props.mode ===
-        "stats"
-      ) {
-        return createElement(
-          "div",
-          {
-            ...data(node),
-            style: {
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(3,minmax(0,1fr))",
-              gap: 16,
-              width: "100%",
-              ...styles
-            }
-          },
-          [
-            "10k+ Projects",
-            "99% Satisfaction",
-            "24/7 Availability"
-          ].map(
-            (text) =>
-              createElement(
-                "article",
-                {
-                  key: text,
-                  style: {
-                    padding: 24,
-                    borderRadius: 12,
-                    background:
-                      "var(--sytely-card)",
-                    textAlign:
-                      "center",
-                    fontWeight: 700
-                  }
-                },
-                text
-              )
-          )
-        );
-      }
-
+    case "features":
       return createElement(
         "div",
         {
@@ -986,48 +841,43 @@ export function renderNode(
           style: {
             display: "grid",
             gridTemplateColumns:
-              "repeat(3,minmax(0,1fr))",
+              `repeat(${Math.max(
+                1,
+                Math.min(
+                  4,
+                  getNumber(
+                    props.columns,
+                    3
+                  )
+                )
+              )},minmax(0,1fr))`,
             gap: 16,
             width: "100%",
-            ...styles
-          }
+            ...styles,
+          },
         },
-        [
-          "Visual editing",
-          "Responsive layouts",
-          "Reusable sections"
-        ].map(
-          (title) =>
-            createElement(
-              "article",
-              {
-                key: title,
-                style: {
-                  padding: 22,
-                  background:
-                    "var(--sytely-card)",
-                  borderRadius: 10
-                }
+        renderCompositeChildren(
+          node,
+          device,
+          [
+            "Visual editing",
+            "Responsive layouts",
+            "Reusable sections",
+          ].map(
+            (title, index) => ({
+              id:
+                `${node.id}-feature-${index}`,
+              type: "card",
+              props: {
+                title,
+                text:
+                  "A reusable feature block.",
               },
-              createElement(
-                "strong",
-                null,
-                title
-              ),
-              createElement(
-                "p",
-                {
-                  style: {
-                    color:
-                      "var(--sytely-text-muted)"
-                  }
-                },
-                "A reusable feature block."
-              )
-            )
+              styles: {},
+            })
+          )
         )
       );
-    }
 
     case "pricing":
       return createElement(
@@ -1037,64 +887,40 @@ export function renderNode(
           style: {
             display: "grid",
             gridTemplateColumns:
-              "repeat(3,minmax(0,1fr))",
+              `repeat(${Math.max(
+                1,
+                Math.min(
+                  4,
+                  getNumber(
+                    props.columns,
+                    3
+                  )
+                )
+              )},minmax(0,1fr))`,
             gap: 16,
             width: "100%",
-            ...styles
-          }
+            ...styles,
+          },
         },
-        [
-          "Starter",
-          "Pro",
-          "Business"
-        ].map(
-          (
-            title,
-            index
-          ) =>
-            createElement(
-              "article",
-              {
-                key: title,
-                style: {
-                  padding: 24,
-                  background:
-                    "var(--sytely-card)",
-                  borderRadius: 12
-                }
+        renderCompositeChildren(
+          node,
+          device,
+          [
+            ["Starter", "$9"],
+            ["Pro", "$24"],
+            ["Business", "$59"],
+          ].map(
+            ([title, price], index) => ({
+              id:
+                `${node.id}-plan-${index}`,
+              type: "card",
+              props: {
+                title,
+                text: price,
               },
-              createElement(
-                "strong",
-                null,
-                title
-              ),
-              createElement(
-                "div",
-                {
-                  style: {
-                    fontSize: 32,
-                    fontWeight: 800,
-                    margin:
-                      "14px 0"
-                  }
-                },
-                `$${[
-                  9,
-                  24,
-                  59
-                ][index]}`
-              ),
-              createElement(
-                "p",
-                {
-                  style: {
-                    color:
-                      "var(--sytely-text-muted)"
-                  }
-                },
-                "Flexible plan for your needs."
-              )
-            )
+              styles: {},
+            })
+          )
         )
       );
 
@@ -1106,18 +932,22 @@ export function renderNode(
           style: {
             margin: 0,
             padding: 28,
-            borderRadius: 12,
+            borderRadius: 14,
             background:
               "var(--sytely-card)",
             fontSize: 20,
             lineHeight: 1.5,
-            ...styles
-          }
+            ...styles,
+          },
         },
         `“${getString(
           props,
-          "text",
-          "A thoughtful product makes the whole experience easier."
+          "quote",
+          getString(
+            props,
+            "text",
+            "A thoughtful product makes the whole experience easier."
+          )
         )}”`,
         createElement(
           "footer",
@@ -1126,8 +956,8 @@ export function renderNode(
               marginTop: 14,
               fontSize: 13,
               color:
-                "var(--sytely-text-muted)"
-            }
+                "var(--sytely-text-muted)",
+            },
           },
           getString(
             props,
@@ -1139,55 +969,44 @@ export function renderNode(
 
     case "faq":
       return createElement(
-        "div",
+        "details",
         {
           ...data(node),
           style: {
-            display: "grid",
-            gap: 8,
-            width: "100%",
-            ...styles
-          }
+            padding: 18,
+            borderRadius: 10,
+            background:
+              "var(--sytely-card)",
+            ...styles,
+          },
         },
-        [
-          "What is Sytely?",
-          "Can I edit responsive layouts?",
-          "Can I create multiple pages?"
-        ].map(
-          (question) =>
-            createElement(
-              "details",
-              {
-                key: question,
-                style: {
-                  padding: 16,
-                  borderRadius: 8,
-                  background:
-                    "var(--sytely-card)"
-                }
-              },
-              createElement(
-                "summary",
-                {
-                  style: {
-                    cursor:
-                      "pointer",
-                    fontWeight: 700
-                  }
-                },
-                question
-              ),
-              createElement(
-                "p",
-                {
-                  style: {
-                    color:
-                      "var(--sytely-text-muted)"
-                  }
-                },
-                "Edit this answer from the component properties."
-              )
-            )
+        createElement(
+          "summary",
+          {
+            style: {
+              cursor: "pointer",
+              fontWeight: 700,
+            },
+          },
+          getString(
+            props,
+            "question",
+            "Frequently asked question"
+          )
+        ),
+        createElement(
+          "p",
+          {
+            style: {
+              color:
+                "var(--sytely-text-muted)",
+            },
+          },
+          getString(
+            props,
+            "answer",
+            "Edit this answer."
+          )
         )
       );
 
@@ -1198,22 +1017,26 @@ export function renderNode(
           ...data(node),
           style: {
             display: "grid",
-            gap: 8,
-            ...styles
-          }
+            gap: 7,
+            ...styles,
+          },
         },
         createElement(
           "strong",
           null,
-          "Contact"
+          getString(
+            props,
+            "title",
+            "Contact"
+          )
         ),
         createElement(
           "span",
           {
             style: {
               color:
-                "var(--sytely-text-muted)"
-            }
+                "var(--sytely-text-muted)",
+            },
           },
           getString(
             props,
@@ -1226,8 +1049,8 @@ export function renderNode(
           {
             style: {
               color:
-                "var(--sytely-text-muted)"
-            }
+                "var(--sytely-text-muted)",
+            },
           },
           getString(
             props,
@@ -1249,14 +1072,16 @@ export function renderNode(
               "var(--sytely-card)",
             color:
               "var(--sytely-text-muted)",
-            ...styles
-          }
+            ...styles,
+          },
         },
-        getString(
-          props,
-          "text",
-          "© 2026 Your brand. All rights reserved."
-        )
+        node.children?.length
+          ? children
+          : getString(
+              props,
+              "text",
+              "© 2026 Your brand. All rights reserved."
+            )
       );
 
     default:
@@ -1266,7 +1091,7 @@ export function renderNode(
 
 export function SytelyRenderer({
   nodes,
-  device = "desktop"
+  device = "desktop",
 }: {
   nodes: ComponentNode[];
   device?: RenderDevice;
@@ -1274,14 +1099,12 @@ export function SytelyRenderer({
   return createElement(
     Fragment,
     null,
-    nodes.map((item) =>
+    nodes.map((node) =>
       createElement(
         Fragment,
-        {
-          key: item.id
-        },
-        renderNode(item, {
-          device
+        { key: node.id },
+        renderNode(node, {
+          device,
         })
       )
     )
