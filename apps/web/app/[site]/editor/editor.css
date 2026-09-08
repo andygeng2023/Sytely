@@ -910,3 +910,159 @@
     width: 235px;
   }
 }
+
+/* Sytely editor layout refinements */
+.editor-body {
+  display: flex;
+  min-width: 0;
+}
+
+.library {
+  width: 280px;
+  flex: 0 0 280px;
+}
+
+.component-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.component-item {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 7px 9px;
+  border-color: transparent;
+  border-radius: 7px;
+  text-align: left;
+}
+
+.component-item span {
+  width: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+}
+
+.component-item small {
+  font-size: 10px;
+  color: #374151;
+}
+
+.template-item {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 4px;
+  padding: 8px 9px;
+  border-color: transparent;
+  border-radius: 7px;
+}
+
+.template-item::before {
+  content: "▤";
+  width: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.template-item strong,
+.template-item span {
+  display: block;
+}
+
+.template-item strong {
+  font-size: 10px;
+}
+
+.template-item span {
+  margin-top: 2px;
+  font-size: 9px;
+}
+
+.page-item {
+  min-height: 40px;
+  margin-bottom: 3px;
+  border-color: transparent;
+  border-radius: 7px;
+}
+
+.page-item > button:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 9px;
+}
+
+.page-item > button:first-child::before {
+  content: "□";
+  width: 20px;
+  flex: 0 0 20px;
+  display: grid;
+  place-items: center;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.page-item > button:first-child strong,
+.page-item > button:first-child span {
+  display: block;
+}
+
+.page-item > button:first-child strong {
+  font-size: 10px;
+}
+
+.page-item > button:first-child span {
+  margin-top: 1px;
+  font-size: 8px;
+}
+
+.floating-inspector {
+  position: relative;
+  top: auto;
+  right: auto;
+  width: 300px;
+  flex: 0 0 300px;
+  height: 100%;
+  max-height: none;
+  overflow: auto;
+  box-sizing: border-box;
+  border: 0;
+  border-left: 1px solid var(--editor-border);
+  border-radius: 0;
+  box-shadow: none;
+  background: #fff;
+  z-index: 90;
+}
+
+.floating-inspector section {
+  padding: 13px;
+}
+
+.editor-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .library {
+    width: 230px;
+    flex-basis: 230px;
+  }
+
+  .floating-inspector {
+    width: 260px;
+    flex-basis: 260px;
+  }
+}

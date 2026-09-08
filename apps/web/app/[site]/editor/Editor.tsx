@@ -20,6 +20,7 @@ import type {
   ComponentType,
   Site,
   SitePage,
+  LayoutMode,
 } from "@sytely/types";
 import "./editor.css";
 
@@ -694,6 +695,7 @@ function createInitialSite(): Site {
     name: "Sytely Site",
     version: 3,
     theme: "system",
+    layoutMode: "sytely",
     pages: [
       {
         id: "page-home",
@@ -1599,6 +1601,24 @@ export default function Editor({
             ...(item.styles ?? {}),
             [key]: value,
           },
+        }),
+      );
+    },
+    [updateNode],
+  );
+
+  const updateLayoutMode = useCallback(
+    (
+      nodeId: string,
+      mode: LayoutMode,
+    ): void => {
+      updateNode(
+        nodeId,
+        (
+          item: ComponentNode,
+        ): ComponentNode => ({
+          ...item,
+          layoutMode: mode,
         }),
       );
     },
@@ -3798,6 +3818,14 @@ export default function Editor({
       device,
     ]);
 
+  const openWebsiteSettings = useCallback((): void => {
+    if (!site) {
+      return;
+    }
+
+    window.location.href = `/${getSiteSlug(site)}/configure`;
+  }, [site]);
+
   useEffect(() => {
     const keyboard = (
       event: KeyboardEvent,
@@ -4033,9 +4061,15 @@ export default function Editor({
         <button
           className="secondary"
           type="button"
-          onClick={
-            openPreview
-          }
+          onClick={openWebsiteSettings}
+        >
+          Website settings
+        </button>
+
+        <button
+          className="secondary"
+          type="button"
+          onClick={openPreview}
         >
           Preview
         </button>
@@ -4597,38 +4631,6 @@ export default function Editor({
             />
           )}
 
-          <Inspector
-            node={selectedNode}
-            selectedNodes={selectedIds
-              .map((id) =>
-                allNodes.find(
-                  (item) => item.id === id,
-                ),
-              )
-              .filter(
-                (item): item is ComponentNode =>
-                  Boolean(item),
-              )}
-            updateProp={
-              updateProp
-            }
-            updateStyle={
-              updateStyle
-            }
-            uploadImage={
-              uploadImage
-            }
-            browseMedia={
-              browseMedia
-            }
-            numericDrafts={
-              numericDrafts
-            }
-            setNumericDrafts={
-              setNumericDrafts
-            }
-          />
-
           {selectedIds.length > 0 && (
             <div className="floating-toolbar editor-ui">
               <span>
@@ -4705,6 +4707,27 @@ export default function Editor({
             </div>
           )}
         </main>
+
+        <Inspector
+          node={selectedNode}
+          selectedNodes={selectedIds
+            .map((id) =>
+              allNodes.find(
+                (item) => item.id === id,
+              ),
+            )
+            .filter(
+              (item): item is ComponentNode =>
+                Boolean(item),
+            )}
+          updateProp={updateProp}
+          updateStyle={updateStyle}
+          updateLayoutMode={updateLayoutMode}
+          uploadImage={uploadImage}
+          browseMedia={browseMedia}
+          numericDrafts={numericDrafts}
+          setNumericDrafts={setNumericDrafts}
+        />
       </div>
 
       <input
@@ -5235,6 +5258,7 @@ function Inspector({
   selectedNodes,
   updateProp,
   updateStyle,
+  updateLayoutMode,
   uploadImage,
   browseMedia,
   numericDrafts,
@@ -5251,6 +5275,10 @@ function Inspector({
     id: string,
     key: string,
     value: unknown,
+  ) => void;
+  updateLayoutMode: (
+    id: string,
+    mode: LayoutMode,
   ) => void;
   uploadImage: (
     id: string,
@@ -5923,6 +5951,32 @@ function Inspector({
             )
           }
         />
+      </section>
+
+      <section>
+        <h3>
+          Advanced
+        </h3>
+
+        <SelectField
+          label="Layout mode"
+          value={node.layoutMode ?? "inherit"}
+          options={[
+            "inherit",
+            "sytely",
+            "custom",
+          ]}
+          onChange={(value: string) =>
+            updateLayoutMode(
+              node.id,
+              value as LayoutMode,
+            )
+          }
+        />
+
+        <p className="inspector-hint">
+          Inherit follows the website layout. Sytely and Custom override it for this component.
+        </p>
       </section>
     </aside>
   );

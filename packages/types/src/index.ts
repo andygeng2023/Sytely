@@ -24,12 +24,33 @@ export type SiteTheme = "system" | "light" | "dark";
 
 export type NodeStyles = Record<string, unknown>;
 
+export type LayoutMode =
+  | "inherit"
+  | "sytely"
+  | "custom";
+
+export interface CustomPosition {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
 export interface ComponentNode {
   id: string;
   type: ComponentType;
   props: Record<string, unknown>;
   styles?: NodeStyles;
   children?: ComponentNode[];
+
+  /**
+   * inherit = use the nearest parent's mode
+   * sytely = responsive flow layout
+   * custom = freeform absolute positioning
+   */
+  layoutMode?: LayoutMode;
+
+  customPosition?: CustomPosition;
 }
 
 export interface PageMargins {
@@ -54,6 +75,7 @@ export interface Site {
   slug?: string;
   version: number;
   theme: SiteTheme;
+  layoutMode: "sytely" | "custom";
   pages: SitePage[];
 }
 

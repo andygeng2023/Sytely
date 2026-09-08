@@ -46,6 +46,7 @@ function starter(): Site {
     )}`,
     version: 1,
     theme: "system",
+    layoutMode: "sytely",
     pages: [
       {
         id: uid(),
@@ -133,7 +134,7 @@ export default function MySitesPage() {
     ]);
 
     window.location.href =
-      `/${site.slug}/editor`;
+      `/${site.slug}/configure`;
   };
 
   const remove = (
