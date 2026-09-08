@@ -18,9 +18,9 @@ import { renderNode } from "@sytely/renderer";
 import type {
   ComponentNode,
   ComponentType,
+  LayoutMode,
   Site,
   SitePage,
-  LayoutMode,
 } from "@sytely/types";
 import "./editor.css";
 
@@ -28,8 +28,7 @@ type Device = "desktop" | "tablet" | "mobile";
 type LeftTab =
   | "components"
   | "templates"
-  | "pages"
-  | "layers";
+  | "pages";
 
 type DropPosition =
   | "before"
@@ -222,6 +221,20 @@ function slugify(value: string): string {
       .replace(/^-+|-+$/g, "") ||
     "website"
   );
+}
+
+function getEffectiveLayoutMode(
+  node: ComponentNode,
+  nodes: ComponentNode[],
+  siteMode: "sytely" | "custom",
+): "sytely" | "custom" {
+  if (node.layoutMode === "sytely" || node.layoutMode === "custom") {
+    return node.layoutMode;
+  }
+  const parentId = findParentId(nodes, node.id);
+  if (!parentId) return siteMode;
+  const parent = findNode(nodes, parentId);
+  return parent ? getEffectiveLayoutMode(parent, nodes, siteMode) : siteMode;
 }
 
 function node(
@@ -1152,6 +1165,36 @@ function placeDroppedNodes(
     : next;
 }
 
+function styleCustomAutoSection(
+  nodes: ComponentNode[],
+  ids: Set<string>,
+  position: { x: number; y: number },
+): ComponentNode[] {
+  return mapNodes(nodes, (item: ComponentNode): ComponentNode => {
+    const childIds = new Set((item.children ?? []).map((child) => child.id));
+    const containsAll = item.type === "section" && [...ids].every((id) => childIds.has(id));
+    if (!containsAll) return item;
+    return {
+      ...item,
+      layoutMode: "custom",
+      customPosition: { x: position.x, y: position.y, width: 620 },
+      styles: {
+        ...(item.styles ?? {}),
+        background: "transparent",
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+      },
+      children: (item.children ?? []).map((child) => ({
+        ...child,
+        customPosition: undefined,
+        layoutMode: "inherit" as LayoutMode,
+      })),
+    };
+  });
+}
+
 function replaceNode(
   nodes: ComponentNode[],
   id: string,
@@ -1240,6 +1283,13 @@ function getSiteSlug(
     candidate ||
     slugify(site.name)
   );
+}
+
+function normalizeSite(site: Site): Site {
+  return {
+    ...site,
+    layoutMode: site.layoutMode === "custom" ? "custom" : "sytely",
+  };
 }
 
 function readSites(): Site[] {
@@ -1341,6 +1391,8 @@ export default function Editor({
     useState<
       Record<string, string>
     >({});
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [layoutTick, setLayoutTick] =
     useState(0);
@@ -1458,7 +1510,8 @@ export default function Editor({
       return;
     }
 
-    setSite(found);
+    const normalized = normalizeSite(found);
+    setSite(normalized);
 
     setActivePageId(
       found.pages[0]?.id ?? "",
@@ -1608,19 +1661,53 @@ export default function Editor({
   );
 
   const updateLayoutMode = useCallback(
-    (
-      nodeId: string,
-      mode: LayoutMode,
-    ): void => {
+    (nodeId: string, mode: LayoutMode): void => {
       updateNode(
         nodeId,
-        (
-          item: ComponentNode,
-        ): ComponentNode => ({
+        (item: ComponentNode): ComponentNode => ({
           ...item,
           layoutMode: mode,
+          ...(mode !== "custom" ? { customPosition: undefined } : {}),
         }),
       );
+    },
+    [updateNode],
+  );
+
+  const setSiteLayoutMode = useCallback(
+    (mode: "sytely" | "custom"): void => {
+      if (!site || site.layoutMode === mode) {
+        setSettingsOpen(false);
+        return;
+      }
+      commit((current: Site): Site => ({
+        ...current,
+        layoutMode: mode,
+        pages: current.pages.map((page: SitePage): SitePage => ({
+          ...page,
+          components: mode === "custom"
+            ? page.components.flatMap((item: ComponentNode) =>
+                item.type === "section" ? (item.children ?? []) : [item]
+              )
+            : page.components,
+        })),
+      }));
+      setSelectedIds([]);
+      setPageSelected(true);
+      setSettingsOpen(false);
+    },
+    [site, commit],
+  );
+
+  const updateNodePosition = useCallback(
+    (nodeId: string, key: "x" | "y" | "width" | "height", value: number): void => {
+      updateNode(nodeId, (item: ComponentNode): ComponentNode => ({
+        ...item,
+        customPosition: {
+          ...(item.customPosition ?? { x: 40, y: 40 }),
+          [key]: value,
+        },
+      }));
     },
     [updateNode],
   );
@@ -2184,8 +2271,16 @@ export default function Editor({
       (
         type: ComponentType,
       ): void => {
-        const fresh =
-          makeComponent(type);
+        const fresh = makeComponent(type);
+        if (site?.layoutMode === "custom") {
+          const count = activePage?.components.length ?? 0;
+          fresh.customPosition = {
+            x: 40 + (count % 4) * 300,
+            y: 40 + Math.floor(count / 4) * 120,
+            width: 280,
+            height: 80,
+          };
+        }
 
         updatePage(
           (
@@ -2205,7 +2300,7 @@ export default function Editor({
 
         setPageSelected(false);
       },
-      [updatePage],
+      [updatePage, site, activePage],
     );
 
   const renameSite =
@@ -2549,6 +2644,20 @@ export default function Editor({
               item.id === id,
           );
 
+        if (site?.layoutMode === "custom") {
+          const before = relY < 0.5;
+          return {
+            id,
+            parentId,
+            index: before ? index : index + 1,
+            position: before ? "before" : "after",
+            layout: "columns",
+            containerLabel: "Create section",
+            columnCount: 2,
+            createsColumns: true,
+          };
+        }
+
         /*
          * Dropping in the middle of a section
          * means "inside".
@@ -2630,7 +2739,7 @@ export default function Editor({
             ),
         };
       },
-      [activePage],
+      [activePage, site],
     );
 
   const handleDragOver =
@@ -2702,10 +2811,19 @@ export default function Editor({
           payload.kind ===
           "component"
         ) {
-          const fresh =
-            makeComponent(
-              payload.componentType,
-            );
+          const fresh = makeComponent(payload.componentType);
+          if (site?.layoutMode === "custom") {
+            const pageElement = document.querySelector<HTMLElement>(".website-page");
+            if (pageElement) {
+              const rect = pageElement.getBoundingClientRect();
+              fresh.customPosition = {
+                x: Math.max(0, (event.clientX - rect.left) / (zoom / 100) - 80),
+                y: Math.max(0, (event.clientY - rect.top) / (zoom / 100) - 30),
+                width: 280,
+                height: 80,
+              };
+            }
+          }
 
           commit(
             (
@@ -2722,11 +2840,13 @@ export default function Editor({
                       ? page
                       : {
                           ...page,
-                          components: placeDroppedNodes(
-                            page.components,
-                            target,
-                            [fresh],
-                          ),
+                          components: (() => {
+                            const placed = placeDroppedNodes(page.components, target, [fresh]);
+                            if ((site?.layoutMode ?? "sytely") !== "custom" || !target.id) return placed;
+                            const ref = findNode(page.components, target.id);
+                            const pos = ref?.customPosition ?? fresh.customPosition ?? { x: 40, y: 40 };
+                            return styleCustomAutoSection(placed, new Set([target.id, fresh.id]), { x: pos.x, y: pos.y });
+                          })(),
                         },
                 ),
             }),
@@ -2752,10 +2872,19 @@ export default function Editor({
             return;
           }
 
-          const fresh =
-            cloneWithNewIds(
-              template.node,
-            );
+          const fresh = cloneWithNewIds(template.node);
+          if (site?.layoutMode === "custom") {
+            const pageElement = document.querySelector<HTMLElement>(".website-page");
+            if (pageElement) {
+              const rect = pageElement.getBoundingClientRect();
+              fresh.customPosition = {
+                x: Math.max(0, (event.clientX - rect.left) / (zoom / 100) - 120),
+                y: Math.max(0, (event.clientY - rect.top) / (zoom / 100) - 50),
+                width: 420,
+                height: 180,
+              };
+            }
+          }
 
           commit(
             (
@@ -2772,11 +2901,13 @@ export default function Editor({
                       ? page
                       : {
                           ...page,
-                          components: placeDroppedNodes(
-                            page.components,
-                            target,
-                            [fresh],
-                          ),
+                          components: (() => {
+                            const placed = placeDroppedNodes(page.components, target, [fresh]);
+                            if ((site?.layoutMode ?? "sytely") !== "custom" || !target.id) return placed;
+                            const ref = findNode(page.components, target.id);
+                            const pos = ref?.customPosition ?? fresh.customPosition ?? { x: 40, y: 40 };
+                            return styleCustomAutoSection(placed, new Set([target.id, fresh.id]), { x: pos.x, y: pos.y });
+                          })(),
                         },
                 ),
             }),
@@ -2955,8 +3086,50 @@ export default function Editor({
         computeDropTarget,
         dropTarget,
         parseDrag,
+        site,
+        zoom,
       ],
     );
+
+  const startCustomMove = useCallback(
+    (event: ReactPointerEvent<HTMLElement>, nodeId: string): void => {
+      if (!site || (site?.layoutMode ?? "sytely") !== "custom" || event.button !== 0) return;
+      const current = findNode(activePage?.components ?? [], nodeId);
+      if (!current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      select(nodeId, event.shiftKey || event.metaKey || event.ctrlKey);
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startPosition = current.customPosition ?? { x: 40, y: 40 };
+      const before = site;
+      const scale = zoom / 100;
+      let moved = false;
+      const move = (pointer: PointerEvent): void => {
+        const dx = (pointer.clientX - startX) / scale;
+        const dy = (pointer.clientY - startY) / scale;
+        if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+        setSite((currentSite) => currentSite ? {
+          ...currentSite,
+          pages: currentSite.pages.map((page) => page.id !== activePageId ? page : {
+            ...page,
+            components: replaceNode(page.components, nodeId, (item) => ({
+              ...item,
+              customPosition: { ...(item.customPosition ?? startPosition), x: Math.max(0, startPosition.x + dx), y: Math.max(0, startPosition.y + dy) },
+            })),
+          }),
+        } : currentSite);
+        setDirty(true); setNotice("Unsaved changes"); setLayoutTick((value) => value + 1);
+      };
+      const up = (): void => {
+        window.removeEventListener("pointermove", move);
+        if (moved) { setHistory((items) => [...items.slice(-49), before]); setFuture([]); }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up, { once: true });
+    },
+    [site, activePage, activePageId, zoom, select],
+  );
 
   const startResize =
     useCallback(
@@ -3268,7 +3441,7 @@ export default function Editor({
       const availableWidth =
         Math.max(
           320,
-          canvas.clientWidth - 318,
+          canvas.clientWidth - 32,
         );
 
       const availableHeight =
@@ -3818,14 +3991,6 @@ export default function Editor({
       device,
     ]);
 
-  const openWebsiteSettings = useCallback((): void => {
-    if (!site) {
-      return;
-    }
-
-    window.location.href = `/${getSiteSlug(site)}/configure`;
-  }, [site]);
-
   useEffect(() => {
     const keyboard = (
       event: KeyboardEvent,
@@ -3951,16 +4116,11 @@ export default function Editor({
         componentInfo,
       ) as ComponentType[]
     ).filter(
-      (
-        type: ComponentType,
-      ): boolean =>
-        componentInfo[
-          type
-        ].label
+      (type: ComponentType): boolean =>
+        type !== "section" &&
+        componentInfo[type].label
           .toLowerCase()
-          .includes(
-            search.toLowerCase(),
-          ),
+          .includes(search.toLowerCase()),
     );
 
   const canvasWidth =
@@ -3969,7 +4129,11 @@ export default function Editor({
       : device === "tablet"
         ? 768
         : 1180;
-
+  
+  if (!site) {
+    return null;
+  }
+  
   return (
     <div className="sytely-editor">
       <header className="editor-ui topbar">
@@ -4059,9 +4223,9 @@ export default function Editor({
         </span>
 
         <button
-          className="secondary"
+          className="secondary settings-button"
           type="button"
-          onClick={openWebsiteSettings}
+          onClick={() => setSettingsOpen(true)}
         >
           Website settings
         </button>
@@ -4069,7 +4233,9 @@ export default function Editor({
         <button
           className="secondary"
           type="button"
-          onClick={openPreview}
+          onClick={
+            openPreview
+          }
         >
           Preview
         </button>
@@ -4083,6 +4249,28 @@ export default function Editor({
         </button>
       </header>
 
+      {settingsOpen && (
+        <div className="settings-backdrop" onMouseDown={() => setSettingsOpen(false)}>
+          <section className="website-settings editor-ui" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="settings-head">
+              <div>
+                <strong>Website settings</strong>
+                <span>Choose the default design system for this website.</span>
+              </div>
+              <button type="button" onClick={() => setSettingsOpen(false)}>×</button>
+            </div>
+            <div className="design-options">
+              <button type="button" className={site.layoutMode === "sytely" ? "selected" : ""} onClick={() => setSiteLayoutMode("sytely")}>
+                <span className="design-icon">▦</span><strong>Sytely Design</strong><small>Structured sections, columns and responsive flow.</small>
+              </button>
+              <button type="button" className={site.layoutMode === "custom" ? "selected" : ""} onClick={() => setSiteLayoutMode("custom")}>
+                <span className="design-icon">✥</span><strong>Custom Design</strong><small>Free positioning like a canvas editor.</small>
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       <div className="editor-body">
         <aside className="editor-ui library">
           <nav className="tabs">
@@ -4091,7 +4279,6 @@ export default function Editor({
                 "components",
                 "templates",
                 "pages",
-                "layers",
               ] as LeftTab[]
             ).map(
               (
@@ -4222,10 +4409,16 @@ export default function Editor({
                       draggable
                       className="template-item"
                       onClick={() => {
-                        const fresh =
-                          cloneWithNewIds(
-                            template.node,
-                          );
+                        const fresh = cloneWithNewIds(template.node);
+                        if (site?.layoutMode === "custom") {
+                          const count = activePage?.components.length ?? 0;
+                          fresh.customPosition = {
+                            x: 40 + (count % 2) * 560,
+                            y: 40 + Math.floor(count / 2) * 260,
+                            width: 520,
+                            height: 220,
+                          };
+                        }
 
                         updatePage(
                           (
@@ -4326,17 +4519,16 @@ export default function Editor({
                           );
                         }}
                       >
-                        <strong>
-                          {
-                            page.name
-                          }
-                        </strong>
+                        <span className="page-icon">▤</span>
+                        <div className="page-copy">
+                          <strong>
+                            {page.name}
+                          </strong>
 
-                        <span>
-                          {
-                            page.slug
-                          }
-                        </span>
+                          <span>
+                            {page.slug}
+                          </span>
+                        </div>
                       </button>
 
                       <div>
@@ -4370,39 +4562,6 @@ export default function Editor({
                     </div>
                   ),
                 )}
-              </>
-            )}
-
-            {leftTab ===
-              "layers" && (
-              <>
-                <h2>
-                  Layers
-                </h2>
-
-                <p>
-                  Every rendered
-                  element is selectable.
-                </p>
-
-                <LayerTree
-                  nodes={
-                    activePage.components
-                  }
-                  selectedIds={
-                    selectedIds
-                  }
-                  onSelect={(
-                    id: string,
-                  ) => {
-                    setSelectedIds(
-                      [id],
-                    );
-                    setPageSelected(
-                      false,
-                    );
-                  }}
-                />
               </>
             )}
           </div>
@@ -4530,7 +4689,7 @@ export default function Editor({
               }}
             >
               <div
-                className="website-page"
+                className={`website-page ${site.layoutMode === "custom" ? "custom-page" : ""}`}
                 style={{
                   background:
                     stringValue(
@@ -4580,12 +4739,14 @@ export default function Editor({
                       selectedIds={
                         selectedIds
                       }
+                      inheritedLayoutMode={(site?.layoutMode ?? "sytely")}
                       onSelect={
                         select
                       }
                       onDragStart={
                         startDrag
                       }
+                      onMoveCustom={startCustomMove}
                     />
                   ),
                 )}
@@ -4630,6 +4791,8 @@ export default function Editor({
               }
             />
           )}
+
+
 
           {selectedIds.length > 0 && (
             <div className="floating-toolbar editor-ui">
@@ -4708,26 +4871,41 @@ export default function Editor({
           )}
         </main>
 
-        <Inspector
-          node={selectedNode}
-          selectedNodes={selectedIds
-            .map((id) =>
-              allNodes.find(
-                (item) => item.id === id,
-              ),
-            )
-            .filter(
-              (item): item is ComponentNode =>
-                Boolean(item),
-            )}
-          updateProp={updateProp}
-          updateStyle={updateStyle}
-          updateLayoutMode={updateLayoutMode}
-          uploadImage={uploadImage}
-          browseMedia={browseMedia}
-          numericDrafts={numericDrafts}
-          setNumericDrafts={setNumericDrafts}
-        />
+          <Inspector
+            node={selectedNode}
+            selectedNodes={selectedIds
+              .map((id) =>
+                allNodes.find(
+                  (item) => item.id === id,
+                ),
+              )
+              .filter(
+                (item): item is ComponentNode =>
+                  Boolean(item),
+              )}
+            updateProp={
+              updateProp
+            }
+            updateStyle={
+              updateStyle
+            }
+            uploadImage={
+              uploadImage
+            }
+            browseMedia={
+              browseMedia
+            }
+            numericDrafts={
+              numericDrafts
+            }
+            setNumericDrafts={
+              setNumericDrafts
+            }
+            updateLayoutMode={updateLayoutMode}
+            siteLayoutMode={(site?.layoutMode ?? "sytely")}
+            effectiveLayoutMode={selectedNode ? getEffectiveLayoutMode(selectedNode, activePage.components, (site?.layoutMode ?? "sytely")) : (site?.layoutMode ?? "sytely")}
+            updateNodePosition={updateNodePosition}
+          />
       </div>
 
       <input
@@ -4747,12 +4925,15 @@ function EditorNode({
   item,
   device,
   selectedIds,
+  inheritedLayoutMode = "sytely",
   onSelect,
   onDragStart,
+  onMoveCustom,
 }: {
   item: ComponentNode;
   device: Device;
   selectedIds: string[];
+  inheritedLayoutMode?: "sytely" | "custom";
   onSelect: (
     id: string,
     additive: boolean,
@@ -4762,6 +4943,7 @@ function EditorNode({
     payload: DragPayload,
     label: string,
   ) => void;
+  onMoveCustom: (event: ReactPointerEvent<HTMLElement>, id: string) => void;
 }): ReactElement {
   /*
    * Children are rendered recursively through
@@ -4780,19 +4962,36 @@ function EditorNode({
           selectedIds={
             selectedIds
           }
+          inheritedLayoutMode={
+            item.layoutMode === "custom" || item.layoutMode === "sytely"
+              ? item.layoutMode
+              : inheritedLayoutMode
+          }
           onSelect={onSelect}
           onDragStart={
             onDragStart
           }
+          onMoveCustom={onMoveCustom}
         />
       ),
     );
 
-  const rendered =
-    renderNode(item, {
+  const effectiveLayoutMode =
+    item.layoutMode === "custom" ||
+    item.layoutMode === "sytely"
+      ? item.layoutMode
+      : inheritedLayoutMode;
+
+  const rendered = renderNode(
+    {
+      ...item,
+      layoutMode: effectiveLayoutMode,
+    },
+    {
       device,
       children,
-    });
+    },
+  );
 
   if (
     !rendered ||
@@ -4849,7 +5048,13 @@ function EditorNode({
     element,
     {
       className,
-      draggable: true,
+      draggable: inheritedLayoutMode !== "custom",
+
+      onPointerDown: (event: ReactPointerEvent<HTMLElement>): void => {
+        if (inheritedLayoutMode === "custom") {
+          onMoveCustom(event, item.id);
+        }
+      },
 
       onClick: (
         event: ReactMouseEvent<HTMLElement>,
@@ -5258,11 +5463,14 @@ function Inspector({
   selectedNodes,
   updateProp,
   updateStyle,
-  updateLayoutMode,
   uploadImage,
   browseMedia,
   numericDrafts,
   setNumericDrafts,
+  updateLayoutMode,
+  siteLayoutMode,
+  effectiveLayoutMode,
+  updateNodePosition,
 }: {
   node: ComponentNode | null;
   selectedNodes: ComponentNode[];
@@ -5276,10 +5484,6 @@ function Inspector({
     key: string,
     value: unknown,
   ) => void;
-  updateLayoutMode: (
-    id: string,
-    mode: LayoutMode,
-  ) => void;
   uploadImage: (
     id: string,
   ) => void;
@@ -5291,10 +5495,12 @@ function Inspector({
     string
   >;
   setNumericDrafts: React.Dispatch<
-    React.SetStateAction<
-      Record<string, string>
-    >
+    React.SetStateAction<Record<string, string>>
   >;
+  updateLayoutMode: (id: string, mode: LayoutMode) => void;
+  siteLayoutMode: "sytely" | "custom";
+  effectiveLayoutMode: "sytely" | "custom";
+  updateNodePosition: (id: string, key: "x" | "y" | "width" | "height", value: number) => void;
 }): ReactElement {
   if (selectedNodes.length > 1) {
     return (
@@ -5453,6 +5659,24 @@ function Inspector({
                 parsed,
               );
             }
+          }}
+        />
+      </label>
+    );
+  };
+
+  const positionField = (key: "x" | "y" | "width" | "height", fallback: number): ReactElement => {
+    const value = node.customPosition?.[key] ?? fallback;
+    return (
+      <label className="field">
+        <span>{key}</span>
+        <input
+          inputMode="decimal"
+          value={String(value)}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (!Number.isFinite(next)) return;
+            updateNodePosition(node.id, key, next);
           }}
         />
       </label>
@@ -5765,10 +5989,32 @@ function Inspector({
       </section>
 
       <section>
-        <h3>
-          Layout
-        </h3>
+        <h3>Design</h3>
+        <SelectField
+          label="Layout mode"
+          value={node.layoutMode ?? "inherit"}
+          options={["inherit", "sytely", "custom"]}
+          onChange={(value: string) => updateLayoutMode(node.id, value as LayoutMode)}
+        />
+        <p className="inspector-hint">
+          Inherit uses {siteLayoutMode === "custom" ? "Custom" : "Sytely"} Design. Override this component when needed.
+        </p>
+      </section>
 
+      {effectiveLayoutMode === "custom" && (
+        <section>
+          <h3>Position</h3>
+          {positionField("x", 40)}
+          {positionField("y", 40)}
+          {positionField("width", safeNumber(node.styles?.width, 280))}
+          {positionField("height", safeNumber(node.styles?.height, 80))}
+        </section>
+      )}
+
+      <section>
+        <h3>Layout</h3>
+        {effectiveLayoutMode === "sytely" && (
+          <>
         {numberField(
           "width",
           0,
@@ -5810,30 +6056,19 @@ function Inspector({
             <SelectField
               label="Direction"
               value={stringValue(
-                node.styles
-                  ?.flexDirection,
+                node.styles?.flexDirection,
                 "column",
               )}
-              options={[
-                "column",
-                "row",
-              ]}
-              onChange={(
-                value: string,
-              ) =>
-                updateStyle(
-                  node.id,
-                  "flexDirection",
-                  value,
-                )
+              options={["column", "row"]}
+              onChange={(value: string) =>
+                updateStyle(node.id, "flexDirection", value)
               }
             />
 
             <SelectField
               label="Columns"
               value={stringValue(
-                node.styles
-                  ?.gridTemplateColumns,
+                node.styles?.gridTemplateColumns,
                 "1fr",
               )}
               options={[
@@ -5844,23 +6079,14 @@ function Inspector({
                 "repeat(5,minmax(0,1fr))",
                 "repeat(6,minmax(0,1fr))",
               ]}
-              onChange={(
-                value: string,
-              ) => {
-                updateStyle(
-                  node.id,
-                  "display",
-                  "grid",
-                );
-
-                updateStyle(
-                  node.id,
-                  "gridTemplateColumns",
-                  value,
-                );
+              onChange={(value: string) => {
+                updateStyle(node.id, "display", "grid");
+                updateStyle(node.id, "gridTemplateColumns", value);
               }}
             />
           </>
+        )}
+        </>
         )}
       </section>
 
@@ -5951,32 +6177,6 @@ function Inspector({
             )
           }
         />
-      </section>
-
-      <section>
-        <h3>
-          Advanced
-        </h3>
-
-        <SelectField
-          label="Layout mode"
-          value={node.layoutMode ?? "inherit"}
-          options={[
-            "inherit",
-            "sytely",
-            "custom",
-          ]}
-          onChange={(value: string) =>
-            updateLayoutMode(
-              node.id,
-              value as LayoutMode,
-            )
-          }
-        />
-
-        <p className="inspector-hint">
-          Inherit follows the website layout. Sytely and Custom override it for this component.
-        </p>
       </section>
     </aside>
   );
