@@ -226,6 +226,59 @@ export default function App() {
     const node: PageNode = { id: uid(), type, name: name ?? (type === "paragraph" ? "Text" : type[0].toUpperCase() + type.slice(1)), text: d.text, parentId: parentOverride !== undefined ? parentOverride : selected?.type === "section" || selected?.type === "container" ? selected.id : selected?.parentId ?? null, visible: true, locked: false, styles: { ...d.styles } };
     commit([...nodes, node]); setSelectedId(node.id); setInspector("Properties"); setToast(`${node.name} added to canvas`);
   }
+  function applyTemplate(templateName: string) {
+    if (!window.confirm("Replace the current page with this template? You can undo the change immediately.")) return;
+    const make = (
+      type: NodeKind, name: string, text: string, parentId: string | null,
+      styles: PageNode["styles"] = {}, extra: Pick<PageNode, "href" | "openInNewTab" | "src"> = {},
+    ): PageNode => ({ id: uid(), type, name, text, parentId, visible: true, locked: false, styles: { ...styles }, ...extra });
+    let next: PageNode[];
+    if (templateName === "Portfolio starter") {
+      const hero = make("section", "Hero section", "", null, { background: "#f8f7ff", padding: 64, align: "center" });
+      const kicker = make("paragraph", "Eyebrow", "INDEPENDENT DESIGNER & DEVELOPER", hero.id, { color: "#6258d9", fontSize: 11, align: "center" });
+      const title = make("heading", "Hero heading", "I build thoughtful digital experiences.", hero.id, { color: "#202033", fontSize: 44, align: "center" });
+      const copy = make("paragraph", "Introduction", "A short introduction to your work, approach, and what makes your projects different.", hero.id, { color: "#66677b", fontSize: 15, align: "center" });
+      const button = make("button", "Portfolio link", "Explore my work", hero.id, { color: "#ffffff", background: "#6258d9", padding: 13, radius: 9, align: "center" }, { href: "#projects" });
+      const projects = make("section", "Projects section", "", null, { background: "#ffffff", padding: 36, align: "center" });
+      const projectsTitle = make("heading", "Projects heading", "Selected projects", projects.id, { fontSize: 28, align: "center" });
+      const projectA = make("feature", "Project card", "Project One · Product design and development", projects.id, { background: "#f8f8fc", padding: 24, radius: 12, align: "left" });
+      const projectB = make("feature", "Project card", "Project Two · Brand and web experience", projects.id, { background: "#f8f8fc", padding: 24, radius: 12, align: "left" });
+      next = [hero, kicker, title, copy, button, projects, projectsTitle, projectA, projectB];
+    } else if (templateName === "SaaS landing page") {
+      const hero = make("section", "Hero section", "", null, { background: "#f7f8ff", padding: 60, align: "center" });
+      const kicker = make("paragraph", "Eyebrow", "A BETTER WAY TO WORK", hero.id, { color: "#6258d9", fontSize: 11, align: "center" });
+      const title = make("heading", "Hero heading", "Your team's next big idea starts here.", hero.id, { fontSize: 42, align: "center" });
+      const copy = make("paragraph", "Hero description", "Bring your workflow together, move faster, and spend more time doing meaningful work.", hero.id, { color: "#68697d", fontSize: 15, align: "center" });
+      const cta = make("button", "Primary CTA", "Get started", hero.id, { color: "#fff", background: "#6258d9", padding: 13, radius: 9, align: "center" });
+      const features = make("section", "Features section", "", null, { background: "#fff", padding: 36, align: "center" });
+      const featuresTitle = make("heading", "Features heading", "Everything in one place", features.id, { fontSize: 28, align: "center" });
+      const f1 = make("feature", "Feature card", "Plan clearly · Keep priorities visible and your team aligned.", features.id, { background: "#fafaff", padding: 22, radius: 12 });
+      const f2 = make("feature", "Feature card", "Work together · Share progress and make decisions faster.", features.id, { background: "#fafaff", padding: 22, radius: 12 });
+      const f3 = make("feature", "Feature card", "Measure progress · Understand what is working and what needs attention.", features.id, { background: "#fafaff", padding: 22, radius: 12 });
+      next = [hero, kicker, title, copy, cta, features, featuresTitle, f1, f2, f3];
+    } else if (templateName === "Product launch") {
+      const hero = make("section", "Hero section", "", null, { background: "#202033", padding: 64, align: "center" });
+      const kicker = make("paragraph", "Eyebrow", "INTRODUCING SOMETHING NEW", hero.id, { color: "#bcb5ff", fontSize: 11, align: "center" });
+      const title = make("heading", "Hero heading", "Meet your new favorite tool.", hero.id, { color: "#ffffff", fontSize: 42, align: "center" });
+      const copy = make("paragraph", "Hero description", "Explain the problem you solve, the people you help, and why now is the right time.", hero.id, { color: "#e0dfeb", fontSize: 15, align: "center" });
+      const cta = make("button", "Primary CTA", "Discover the product", hero.id, { color: "#202033", background: "#ffffff", padding: 13, radius: 9, align: "center" });
+      const details = make("section", "Benefits section", "", null, { background: "#fff", padding: 38, align: "center" });
+      const detailsTitle = make("heading", "Benefits heading", "Designed for your next chapter", details.id, { fontSize: 27, align: "center" });
+      const detail = make("feature", "Benefit card", "Simple to start. Powerful as you grow.", details.id, { background: "#f8f8fc", padding: 24, radius: 12 });
+      next = [hero, kicker, title, copy, cta, details, detailsTitle, detail];
+    } else {
+      next = initialNodes.map(node => ({ ...node, id: uid(), parentId: node.parentId ? "mapped" : null, styles: { ...node.styles } }));
+      const ids = new Map(initialNodes.map(node => [node.id, uid()]));
+      next = initialNodes.map(node => ({ ...node, id: ids.get(node.id)!, parentId: node.parentId ? ids.get(node.parentId)! : null, styles: { ...node.styles } }));
+    }
+    commit(next);
+    setSelectedId(next[0]?.id ?? "");
+    setPageName("Home");
+    setWorkspace("Add");
+    setInspector("Properties");
+    setToast(`${templateName} template applied`);
+  }
+
   function updateSelected(patch: Partial<PageNode> | { styles: Partial<PageNode["styles"]> }) {
     if (!selected || selected.locked) return;
     commit(nodes.map(n => n.id === selected.id ? { ...n, ...patch, styles: "styles" in patch ? { ...n.styles, ...patch.styles } : n.styles } : n));
@@ -405,7 +458,7 @@ export default function App() {
       "Add-ons": { icon: Grid2X2, title: "Extend your workspace", description: "Connect tools and customize your workflow.", cards: ["Integrations", "Design themes", "Installed add-ons", "Manage permissions"] },
     };
     const data = content[workspace]; const Icon = data.icon;
-    return <><div className="panel-heading"><div><h2>{workspace}</h2><p>{data.description}</p></div></div><div className="workspace-scroll"><div className="feature-panel-hero"><span className="large-feature-icon"><Icon size={23}/></span><h3>{data.title}</h3><p>{data.description}</p></div>{data.cards.map((card, i) => <button className="resource-row" key={card} onClick={() => { if (workspace === "Templates") { addNode("section", card); } else setToast(`${card} workspace selected`); }}><span className="resource-icon">{i === 0 ? <FolderOpen size={16}/> : i === 1 ? <Database size={16}/> : <Box size={16}/>}</span><span>{card}<small>{workspace === "Templates" ? "Starter layout" : workspace === "Databases" ? "Sample collection" : "Workspace resource"}</small></span><ChevronRight size={14}/></button>)}</div></>;
+    return <><div className="panel-heading"><div><h2>{workspace}</h2><p>{data.description}</p></div></div><div className="workspace-scroll"><div className="feature-panel-hero"><span className="large-feature-icon"><Icon size={23}/></span><h3>{data.title}</h3><p>{data.description}</p></div>{data.cards.map((card, i) => <button className="resource-row" key={card} onClick={() => { if (workspace === "Templates") applyTemplate(card); else setToast(`${card} is not available in this build yet`); }}><span className="resource-icon">{i === 0 ? <FolderOpen size={16}/> : i === 1 ? <Database size={16}/> : <Box size={16}/>}</span><span>{card}<small>{workspace === "Templates" ? "Starter layout" : workspace === "Databases" ? "Sample collection" : "Workspace resource"}</small></span><ChevronRight size={14}/></button>)}</div></>;
   };
 
   const renderInspector = () => {
