@@ -63,6 +63,19 @@ describe("SiteAudit", () => {
     expect(onSelect).toHaveBeenCalledWith("home", "image-1");
   });
 
+  it("flags explicit text and background colors with insufficient contrast", async () => {
+    await act(async () => {
+      root.render(createElement(SiteAudit, {
+        pages: [{ id: "home", name: "Home", nodes: [
+          { id: "heading-1", type: "heading", name: "Low contrast heading", text: "Hard to read", parentId: null, visible: true, styles: { color: "#aaaaaa", background: "#ffffff", fontSize: 16 } },
+        ] }],
+        onSelect: vi.fn(),
+      }));
+    });
+    expect(host.textContent).toContain("Text contrast may be too low");
+    expect(host.textContent).toContain("2.32:1");
+  });
+
   it("shows a clean state when no heuristic issues are detected", async () => {
     await act(async () => {
       root.render(createElement(SiteAudit, {
