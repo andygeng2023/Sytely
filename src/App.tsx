@@ -57,6 +57,7 @@ const workspaceItems: { name: Workspace; icon: typeof Plus; subtitle: string }[]
 const inspectorItems: { name: InspectorMode; icon: typeof Plus }[] = [
   { name: "Properties", icon: SlidersHorizontal }, { name: "Layout", icon: Columns2 },
   { name: "Style", icon: Paintbrush }, { name: "Responsive", icon: Smartphone },
+  { name: "Interactions", icon: MousePointer2 },
   { name: "Accessibility", icon: Accessibility }, { name: "Advanced", icon: Settings2 },
 ];
 const elementGroups: { label: string; icon: typeof Plus; items: { label: string; type: NodeKind; icon: typeof Plus; description: string }[] }[] = [
