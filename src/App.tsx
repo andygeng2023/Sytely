@@ -52,6 +52,7 @@ const workspaceItems: { name: Workspace; icon: typeof Plus; subtitle: string }[]
   { name: "Add", icon: Plus, subtitle: "Elements" },
   { name: "Layers", icon: Layers, subtitle: "Pages & layers" },
   { name: "Templates", icon: LayoutTemplate, subtitle: "Starting points" },
+  { name: "Components", icon: Shapes, subtitle: "Reusable library" },
 ];
 const inspectorItems: { name: InspectorMode; icon: typeof Plus }[] = [
   { name: "Properties", icon: SlidersHorizontal }, { name: "Layout", icon: Columns2 },
