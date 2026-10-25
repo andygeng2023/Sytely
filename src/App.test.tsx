@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { act } from "react";
@@ -8,6 +9,7 @@ let host: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   window.localStorage.clear();
   host = document.createElement("div");
   document.body.appendChild(host);
