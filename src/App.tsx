@@ -245,7 +245,10 @@ function buildStaticHtml(pages: PageSnapshot[], siteName: string): string {
     const nested = all.filter(child => child.parentId === node.id).map(child => renderNode(child, all)).join("");
     for (const breakpoint of ["tablet", "mobile"] as const) {
       const overrideStyle = staticStyle(node.responsive?.[breakpoint]);
-      if (overrideStyle) cssRules.push(`@${breakpoint === "tablet" ? "media (max-width: 900px)" : "media (max-width: 600px)"}{.${className}{${overrideStyle}}}`);
+      if (overrideStyle) {
+        const responsiveDeclarations = overrideStyle.split(";").filter(Boolean).map(declaration => `${declaration} !important`).join(";");
+        cssRules.push(`@${breakpoint === "tablet" ? "media (max-width: 900px)" : "media (max-width: 600px)"}{.${className}{${responsiveDeclarations}}}`);
+      }
     }
     const text = escapeHtml(node.text);
     if (node.type === "heading") {
