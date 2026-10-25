@@ -124,16 +124,16 @@ function isPageNodeArray(value: unknown): value is PageNode[] {
       const max = key === "fontSize" ? 128 : key === "padding" ? 200 : 100;
       if (number !== undefined && (typeof number !== "number" || !Number.isFinite(number) || number < 0 || number > max)) return false;
     }
-    if (styles.fontFamily !== undefined && !["Inter", "Arial", "Georgia", "Times New Roman", "system-ui", "monospace"].includes(styles.fontFamily)) return false;
+    if (styles.fontFamily !== undefined && !["Inter", "Arial", "Georgia", "Times New Roman", "system-ui", "monospace"].includes(String(styles.fontFamily))) return false;
     if (styles.fontWeight !== undefined && (typeof styles.fontWeight !== "number" || !Number.isInteger(styles.fontWeight) || styles.fontWeight < 100 || styles.fontWeight > 900)) return false;
     if (styles.lineHeight !== undefined && (typeof styles.lineHeight !== "number" || !Number.isFinite(styles.lineHeight) || styles.lineHeight < 0.8 || styles.lineHeight > 3)) return false;
     if (styles.letterSpacing !== undefined && (typeof styles.letterSpacing !== "number" || !Number.isFinite(styles.letterSpacing) || styles.letterSpacing < -5 || styles.letterSpacing > 20)) return false;
-    if (styles.textTransform !== undefined && !["none", "uppercase", "lowercase", "capitalize"].includes(styles.textTransform)) return false;
+    if (styles.textTransform !== undefined && !["none", "uppercase", "lowercase", "capitalize"].includes(String(styles.textTransform))) return false;
     if (styles.margin !== undefined && (typeof styles.margin !== "number" || !Number.isFinite(styles.margin) || styles.margin < 0 || styles.margin > 200)) return false;
     if (styles.borderWidth !== undefined && (typeof styles.borderWidth !== "number" || !Number.isFinite(styles.borderWidth) || styles.borderWidth < 0 || styles.borderWidth > 20)) return false;
     if (styles.borderColor !== undefined && (typeof styles.borderColor !== "string" || !/^#[0-9a-f]{3,6}$/i.test(styles.borderColor))) return false;
     if (styles.opacity !== undefined && (typeof styles.opacity !== "number" || !Number.isFinite(styles.opacity) || styles.opacity < 0 || styles.opacity > 1)) return false;
-    if (styles.shadow !== undefined && !["none", "soft", "medium", "strong"].includes(styles.shadow)) return false;
+    if (styles.shadow !== undefined && !["none", "soft", "medium", "strong"].includes(String(styles.shadow))) return false;
     if (node.openInNewTab !== undefined && typeof node.openInNewTab !== "boolean") return false;
     if (node.interaction !== undefined) {
       const interaction = node.interaction as NodeInteraction;
