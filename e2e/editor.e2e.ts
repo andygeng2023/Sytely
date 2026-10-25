@@ -25,7 +25,8 @@ test("layout controls apply flex and grid styles to the selected element", async
 test("style inspector applies typography and responsive overrides to the canvas", async ({ page, isMobile }) => {
   test.skip(isMobile, "The full editor inspector is desktop-oriented; mobile canvas coverage is tested separately.");
   const heading = page.locator(".site-content h1").first();
-  await heading.click();
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await page.locator(".layer-row").filter({ hasText: "Heading" }).first().click();
   await page.getByRole("button", { name: "Style", exact: true }).click();
   await page.getByLabel("Font family").selectOption("Georgia");
   await page.getByLabel("Text transform").selectOption("uppercase");
