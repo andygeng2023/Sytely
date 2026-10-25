@@ -61,29 +61,53 @@ const elementGroups: { label: string; icon: typeof Plus; items: { label: string;
 ];
 const uid = () => `node-${Math.random().toString(36).slice(2, 9)}`;
 
+function isPageNodeArray(value: unknown): value is PageNode[] {
+  if (!Array.isArray(value)) return false;
+  const allowed = new Set<NodeKind>(["heading", "paragraph", "button", "section", "image", "feature", "container"]);
+  const ids = new Set<string>();
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object") return false;
+    const node = candidate as Partial<PageNode>;
+    if (typeof node.id !== "string" || !node.id || ids.has(node.id) ||
+        typeof node.name !== "string" || typeof node.text !== "string" ||
+        typeof node.type !== "string" || !allowed.has(node.type as NodeKind) ||
+        !(node.parentId === null || typeof node.parentId === "string") ||
+        typeof node.visible !== "boolean" || typeof node.locked !== "boolean" ||
+        !node.styles || typeof node.styles !== "object" || Array.isArray(node.styles)) return false;
+    ids.add(node.id);
+  }
+  for (const candidate of value as PageNode[]) {
+    if (candidate.parentId !== null && !ids.has(candidate.parentId)) return false;
+    const ancestors = new Set<string>([candidate.id]);
+    let parentId = candidate.parentId;
+    while (parentId !== null) {
+      if (ancestors.has(parentId)) return false;
+      ancestors.add(parentId);
+      const parent = (value as PageNode[]).find(node => node.id === parentId);
+      if (!parent) return false;
+      parentId = parent.parentId;
+    }
+  }
+  return true;
+}
+
 export default function App() {
   const [nodes, setNodes] = useState<PageNode[]>(() => {
     try {
       const raw = window.localStorage.getItem("sytely:document:v1");
       if (!raw) return initialNodes;
       const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed) || !parsed.every((node) =>
-        node && typeof node.id === "string" && typeof node.type === "string" &&
-        typeof node.name === "string" && typeof node.text === "string" &&
-        (node.parentId === null || typeof node.parentId === "string") &&
-        typeof node.visible === "boolean" && typeof node.locked === "boolean" &&
-        node.styles && typeof node.styles === "object"
-      )) return initialNodes;
-      return parsed as PageNode[];
+      if (!isPageNodeArray(parsed)) return initialNodes;
+      return parsed;
     } catch { return initialNodes; }
   });
   const [selectedId, setSelectedId] = useState(() => {
     try {
       const raw = window.localStorage.getItem("sytely:document:v1");
       if (raw) {
-        const parsed = JSON.parse(raw) as PageNode[];
-        if (Array.isArray(parsed) && parsed.some((node) => node.id === "hero-button")) return "hero-button";
-        if (Array.isArray(parsed) && parsed[0]?.id) return parsed[0].id;
+        const parsed: unknown = JSON.parse(raw);
+        if (isPageNodeArray(parsed) && parsed.some((node) => node.id === "hero-button")) return "hero-button";
+        if (isPageNodeArray(parsed) && parsed[0]?.id) return parsed[0].id;
       }
     } catch { /* recover with the starter document */ }
     return "hero-button";
@@ -113,7 +137,7 @@ export default function App() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [pageName, setPageName] = useState("Home");
   const canvasRef = useRef<HTMLDivElement>(null);
-  const selected = nodes.find(n => n.id === selectedId) ?? nodes[0];
+  const selected = nodes.find(n => n.id === selectedId);
   const childrenOf = useCallback((parentId: string | null) => nodes.filter(n => n.parentId === parentId), [nodes]);
   const childNodes = useMemo(() => nodes.filter(n => n.parentId === selectedId), [nodes, selectedId]);
 
@@ -182,7 +206,7 @@ export default function App() {
   function redo() {
     setFuture(f => { if (!f.length) return f; const next = f[0]; setHistory(h => [...h, nodes]); setNodes(next); setSaveState("unsaved"); setSavedLabel("Unsaved changes"); return f.slice(1); });
   }
-  function addNode(type: NodeKind, name?: string) {
+  function addNode(type: NodeKind, name?: string, parentOverride?: string | null) {
     const defaults: Record<NodeKind, { text: string; styles: PageNode["styles"] }> = {
       heading: { text: "Your heading", styles: { fontSize: 30, color: "#202033", align: "center" } },
       paragraph: { text: "Add your text here. Tell your story clearly.", styles: { fontSize: 14, color: "#6f7184", align: "center" } },
@@ -193,11 +217,11 @@ export default function App() {
       container: { text: "", styles: { background: "#fafaff", padding: 20, radius: 10, align: "center" } },
     };
     const d = defaults[type];
-    const node: PageNode = { id: uid(), type, name: name ?? (type === "paragraph" ? "Text" : type[0].toUpperCase() + type.slice(1)), text: d.text, parentId: selected?.type === "section" || selected?.type === "container" ? selected.id : selected?.parentId ?? null, visible: true, locked: false, styles: { ...d.styles } };
+    const node: PageNode = { id: uid(), type, name: name ?? (type === "paragraph" ? "Text" : type[0].toUpperCase() + type.slice(1)), text: d.text, parentId: parentOverride !== undefined ? parentOverride : selected?.type === "section" || selected?.type === "container" ? selected.id : selected?.parentId ?? null, visible: true, locked: false, styles: { ...d.styles } };
     commit([...nodes, node]); setSelectedId(node.id); setInspector("Properties"); setToast(`${node.name} added to canvas`);
   }
   function updateSelected(patch: Partial<PageNode> | { styles: Partial<PageNode["styles"]> }) {
-    if (!selected) return;
+    if (!selected || selected.locked) return;
     commit(nodes.map(n => n.id === selected.id ? { ...n, ...patch, styles: "styles" in patch ? { ...n.styles, ...patch.styles } : n.styles } : n));
   }
   function removeNode(id: string) {
@@ -209,9 +233,30 @@ export default function App() {
     commit(next); setSelectedId(next[Math.max(0, next.findIndex(n => n.id === id) - 1)]?.id ?? next[0].id); setToast("Element removed · undo available");
   }
   function duplicateNode() {
-    if (!selected) return;
-    const clone = { ...selected, id: uid(), name: `${selected.name} copy`, styles: { ...selected.styles } };
-    commit([...nodes, clone]); setSelectedId(clone.id); setToast("Element duplicated");
+    if (!selected || selected.locked) return;
+    const subtreeIds = new Set<string>([selected.id]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      nodes.forEach(node => {
+        if (node.parentId && subtreeIds.has(node.parentId) && !subtreeIds.has(node.id)) {
+          subtreeIds.add(node.id);
+          changed = true;
+        }
+      });
+    }
+    const clones = nodes.filter(node => subtreeIds.has(node.id));
+    const idMap = new Map(clones.map(node => [node.id, uid()]));
+    const copies = clones.map((node, index) => ({
+      ...node,
+      id: idMap.get(node.id)!,
+      name: index === 0 ? `${node.name} copy` : node.name,
+      parentId: node.id === selected.id ? node.parentId : idMap.get(node.parentId!)!,
+      styles: { ...node.styles },
+    }));
+    commit([...nodes, ...copies]);
+    setSelectedId(copies[0].id);
+    setToast(`Duplicated ${copies.length === 1 ? "element" : `element and ${copies.length - 1} nested elements`}`);
   }
   function moveNode(direction: number) {
     if (!selected) return;
@@ -243,7 +288,12 @@ export default function App() {
     const id = e.dataTransfer.getData("text/sytely-node") || (draggingId && nodes.some(n => n.id === draggingId) ? draggingId : null);
     const draggedType = e.dataTransfer.getData("text/sytely-type");
     if (!id && draggedType && ["heading", "paragraph", "button", "section", "image", "feature", "container"].includes(draggedType)) {
-      addNode(draggedType as NodeKind);
+      const target = targetId ? nodes.find(n => n.id === targetId) : undefined;
+      const parentId = target && (target.type === "section" || target.type === "container")
+        ? target.id
+        : target?.parentId ?? null;
+      addNode(draggedType as NodeKind, undefined, parentId);
+      setDraggingId(null);
       return;
     }
     if (!id) return;
@@ -280,6 +330,7 @@ export default function App() {
   );
 
   const renderElement = (node: PageNode) => {
+    if (!node.visible && preview) return null;
     if (!node.visible && !preview) return <div className="hidden-node" key={node.id} onClick={() => setSelectedId(node.id)}><Eye size={12}/> {node.name} <span>Hidden in editor</span></div>;
     const isSelected = selectedId === node.id;
     const style: React.CSSProperties = {
@@ -287,7 +338,7 @@ export default function App() {
       fontSize: node.styles.fontSize, padding: node.type === "button" ? `${node.styles.padding ?? 12}px 22px` : node.type === "section" || node.type === "container" || node.type === "feature" || node.type === "image" ? node.styles.padding : undefined,
       borderRadius: node.styles.radius, textAlign: (node.styles.align as React.CSSProperties["textAlign"]) ?? "center",
     };
-    const inner = node.type === "heading" ? <h1 style={style} contentEditable={!preview} suppressContentEditableWarning onBlur={e => { if (e.currentTarget.textContent !== node.text) commit(nodes.map(n => n.id === node.id ? { ...n, text: e.currentTarget.textContent ?? "" } : n)); }} onClick={e => e.stopPropagation()}>{node.text}</h1>
+    const inner = node.type === "heading" ? <h1 style={style} contentEditable={!preview && !node.locked} suppressContentEditableWarning onBlur={e => { if (e.currentTarget.textContent !== node.text) commit(nodes.map(n => n.id === node.id ? { ...n, text: e.currentTarget.textContent ?? "" } : n)); }} onClick={e => e.stopPropagation()}>{node.text}</h1>
       : node.type === "paragraph" ? <p style={style} contentEditable={!preview} suppressContentEditableWarning onBlur={e => { if (e.currentTarget.textContent !== node.text) commit(nodes.map(n => n.id === node.id ? { ...n, text: e.currentTarget.textContent ?? "" } : n)); }} onClick={e => e.stopPropagation()}>{node.text}</p>
       : node.type === "button" ? <button className="site-cta" style={style} onClick={e => { e.stopPropagation(); if (!preview) setSelectedId(node.id); else setToast("Preview interaction: button clicked"); }}>{node.text}</button>
       : node.type === "image" ? <div className="image-placeholder" style={style}><Image size={24}/><span>{node.text}</span><small>Choose image in properties</small></div>
