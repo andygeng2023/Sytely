@@ -57,6 +57,17 @@ test("exports a standalone HTML file from the editor", async ({ page, isMobile }
   expect(download.suggestedFilename()).toMatch(/\.html$/i);
 });
 
+test("site audit flags missing image alt text and selects the element to fix", async ({ page, isMobile }) => {
+  test.skip(isMobile, "The full editor inspector is desktop-oriented; mobile canvas coverage is tested separately.");
+  await page.getByRole("button", { name: "Image", exact: true }).click();
+  await page.getByLabel("Text content").fill("");
+  await page.getByRole("button", { name: "Audit", exact: true }).click();
+  await expect(page.getByText("Image needs alternative text")).toBeVisible();
+  await page.getByRole("button", { name: /Select Image to fix Image needs alternative text/ }).click();
+  await expect(page.getByRole("heading", { name: "Accessibility" })).toBeVisible();
+  await expect(page.getByPlaceholder("Describe the image")).toBeVisible();
+});
+
 test("mobile viewport keeps the editor canvas usable", async ({ page, isMobile }) => {
   test.skip(!isMobile, "This check is specific to mobile browser emulation.");
   await expect(page.locator(".site-content")).toBeVisible();
