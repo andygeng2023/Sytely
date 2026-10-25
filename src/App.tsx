@@ -248,6 +248,14 @@ export default function App() {
     if (!id) return;
     const node = nodes.find(n => n.id === id);
     if (!node || id === targetId) return;
+    // Reject moves that would create a cycle (a node cannot be dropped into its own subtree).
+    if (targetId) {
+      let ancestor: string | null | undefined = targetId;
+      while (ancestor) {
+        if (ancestor === id) { setToast("An element cannot be moved inside itself"); setDraggingId(null); return; }
+        ancestor = nodes.find(n => n.id === ancestor)?.parentId;
+      }
+    }
     if (targetId && (nodes.find(n => n.id === targetId)?.type === "section" || nodes.find(n => n.id === targetId)?.type === "container")) {
       commit(nodes.map(n => n.id === id ? { ...n, parentId: targetId } : n));
     } else {
