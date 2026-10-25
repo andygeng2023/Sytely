@@ -28,3 +28,8 @@
 .published-footer{border-top:1px solid #eeeef4;padding:24px;text-align:center;color:#77778b;font-size:12px}
 .published-message{min-height:100vh;display:grid;align-content:center;justify-items:center;gap:10px;font-family:system-ui,sans-serif;color:#25253a}
 .published-message a{color:#6258d9}
+
+/* Preview mode must reflect the authored document, not the editor's chrome. */
+.preview-mode .site-navbar,
+.preview-mode .site-footer { display: none; }
+.preview-mode .site-content { min-height: 0; }
