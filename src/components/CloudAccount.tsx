@@ -29,6 +29,7 @@ export function CloudAccount({ nodes, pages, activePageId, pageName, onToast, on
   const [projects, setProjects] = useState<CloudProject[]>([]);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectError, setProjectError] = useState("");
+  const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectId, setProjectId] = useState(() => {
     try { return window.localStorage.getItem("sytely:cloud-project:v1") ?? ""; } catch { return ""; }
   });
@@ -42,11 +43,14 @@ export function CloudAccount({ nodes, pages, activePageId, pageName, onToast, on
 
   async function refreshProjects() {
     if (!supabase || !session?.user) return;
+    setProjectsLoading(true);
     setProjectError("");
-    const { data, error } = await supabase.from("sytely_projects").select("id,name,slug,document,is_published,updated_at")
-      .eq("owner_id", session.user.id).order("updated_at", { ascending: false }).limit(100);
-    if (error) { setProjectError("Could not load projects. Check your connection and try again."); return; }
-    setProjects((data ?? []) as CloudProject[]);
+    try {
+      const { data, error } = await supabase.from("sytely_projects").select("id,name,slug,document,is_published,updated_at")
+        .eq("owner_id", session.user.id).order("updated_at", { ascending: false }).limit(100);
+      if (error) { setProjectError("Could not load projects. Check your connection and try again."); return; }
+      setProjects((data ?? []) as CloudProject[]);
+    } finally { setProjectsLoading(false); }
   }
 
   useEffect(() => {
@@ -72,7 +76,7 @@ export function CloudAccount({ nodes, pages, activePageId, pageName, onToast, on
           const { error } = await supabase!.from("sytely_projects").update({ name: pageName || "My website", document }).eq("id", id);
           if (error) throw error;
         }
-        if (!cancelled) { setStatus("Cloud saved"); void refreshProjects(); }
+        if (!cancelled) setStatus("Cloud saved");
       } catch (error) {
         if (!cancelled) setStatus("Cloud save failed");
         console.error("Sytely cloud save failed", error);
@@ -172,7 +176,7 @@ export function CloudAccount({ nodes, pages, activePageId, pageName, onToast, on
             <label className="cloud-project-search">Search projects<input value={projectSearch} onChange={event => setProjectSearch(event.target.value)} placeholder="Search by project name…" /></label>
             <div className="cloud-project-list" aria-label="Cloud projects">
               {projectError && <p className="cloud-project-error" role="alert">{projectError} <button onClick={() => void refreshProjects()}>Retry</button></p>}
-              {!projectError && projects.length === 0 && <div className="cloud-project-empty"><strong>No cloud projects yet</strong><span>Create your first project to start building a site.</span></div>}
+              {!projectError && projectsLoading && projects.length === 0 && <div className="cloud-project-empty">Loading your projects…</div>}{!projectError && !projectsLoading && projects.length === 0 && <div className="cloud-project-empty"><strong>No cloud projects yet</strong><span>Create your first project to start building a site.</span></div>}
               {!projectError && projects.length > 0 && filteredProjects.length === 0 && <div className="cloud-project-empty">No projects match that search.</div>}
               {filteredProjects.map(project => <article className={project.id === projectId ? "cloud-project-row current" : "cloud-project-row"} key={project.id}>
                 <button className="cloud-project-open" disabled={busy} onClick={() => openProject(project)}>
