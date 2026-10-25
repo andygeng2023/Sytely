@@ -60,10 +60,9 @@ test("exports a standalone HTML file from the editor", async ({ page, isMobile }
 test("mobile viewport keeps the editor canvas usable", async ({ page, isMobile }) => {
   test.skip(!isMobile, "This check is specific to mobile browser emulation.");
   await expect(page.locator(".site-content")).toBeVisible();
-  await expect(page.locator(".site-content")).toBeVisible();
-  // The mobile device viewport can place the toolbar outside the initial scroll position.
-  // Dispatch the real toolbar control without relying on pointer auto-scroll heuristics.
-  await page.locator('.viewport-switcher button[aria-label="Mobile viewport"]').click({ force: true });
+  // Trigger the viewport control directly: on narrow emulated screens the toolbar can be
+  // partially clipped, which makes pointer-based clicks unreliable despite the control existing.
+  await page.locator('.viewport-switcher button[aria-label="Mobile viewport"]').evaluate((button: HTMLButtonElement) => button.click());
   await expect(page.locator(".website-page")).toHaveClass(/mobile/);
   await expect(page.locator(".canvas-stage")).toHaveCSS("width", "390px");
 });
