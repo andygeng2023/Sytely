@@ -316,6 +316,8 @@ export default function App() {
         e.preventDefault();
         try {
           window.localStorage.setItem("sytely:document:v1", JSON.stringify(nodes));
+          window.localStorage.setItem("sytely:pages:v1", JSON.stringify(pages.map(page => page.id === activePageId ? { ...page, name: pageName, nodes } : page)));
+          window.localStorage.setItem("sytely:active-page:v1", activePageId);
           setSavedLabel("Saved on this device");
           setSaveState("saved");
           setToast("Project saved locally");
@@ -413,6 +415,8 @@ export default function App() {
   function switchPage(pageId: string) {
     const page = pages.find(item => item.id === pageId);
     if (!page) return;
+    setHistory([]);
+    setFuture([]);
     setActivePageId(page.id);
     setNodes(page.nodes);
     setPageName(page.name);
@@ -433,6 +437,8 @@ export default function App() {
     ];
     const page = { id: pageId, name: name.trim().slice(0, 80), nodes: newNodes };
     setPages(current => [...current, page]);
+    setHistory([]);
+    setFuture([]);
     setActivePageId(pageId);
     setNodes(newNodes);
     setPageName(page.name);
