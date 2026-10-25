@@ -61,8 +61,32 @@ const elementGroups: { label: string; icon: typeof Plus; items: { label: string;
 const uid = () => `node-${Math.random().toString(36).slice(2, 9)}`;
 
 export default function App() {
-  const [nodes, setNodes] = useState<PageNode[]>(initialNodes);
-  const [selectedId, setSelectedId] = useState("hero-button");
+  const [nodes, setNodes] = useState<PageNode[]>(() => {
+    try {
+      const raw = window.localStorage.getItem("sytely:document:v1");
+      if (!raw) return initialNodes;
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed) || !parsed.every((node) =>
+        node && typeof node.id === "string" && typeof node.type === "string" &&
+        typeof node.name === "string" && typeof node.text === "string" &&
+        (node.parentId === null || typeof node.parentId === "string") &&
+        typeof node.visible === "boolean" && typeof node.locked === "boolean" &&
+        node.styles && typeof node.styles === "object"
+      )) return initialNodes;
+      return parsed as PageNode[];
+    } catch { return initialNodes; }
+  });
+  const [selectedId, setSelectedId] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem("sytely:document:v1");
+      if (raw) {
+        const parsed = JSON.parse(raw) as PageNode[];
+        if (Array.isArray(parsed) && parsed.some((node) => node.id === "hero-button")) return "hero-button";
+        if (Array.isArray(parsed) && parsed[0]?.id) return parsed[0].id;
+      }
+    } catch { /* recover with the starter document */ }
+    return "hero-button";
+  });
   const [workspace, setWorkspace] = useState<Workspace>("Add");
   const [inspector, setInspector] = useState<InspectorMode>("Properties");
   const [backendTab, setBackendTab] = useState<BackendTab>("Blocks");
@@ -115,6 +139,35 @@ export default function App() {
     const t = window.setTimeout(() => setToast(""), 2200);
     return () => window.clearTimeout(t);
   }, [toast]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem("sytely:document:v1", JSON.stringify(nodes));
+        setSaveState("saved");
+        setSavedLabel("Saved on this device");
+      } catch {
+        setSaveState("unsaved");
+        setSavedLabel("Local storage unavailable");
+      }
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [nodes]);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("sytely:workspace:v1");
+      if (!raw) return;
+      const value = JSON.parse(raw) as { leftWidth?: number; rightWidth?: number; leftCollapsed?: boolean; rightCollapsed?: boolean };
+      if (typeof value.leftWidth === "number") setLeftWidth(Math.max(200, Math.min(480, value.leftWidth)));
+      if (typeof value.rightWidth === "number") setRightWidth(Math.max(240, Math.min(600, value.rightWidth)));
+      if (typeof value.leftCollapsed === "boolean") setLeftCollapsed(value.leftCollapsed);
+      if (typeof value.rightCollapsed === "boolean") setRightCollapsed(value.rightCollapsed);
+    } catch { /* ignore invalid workspace preferences */ }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("sytely:workspace:v1", JSON.stringify({ leftWidth, rightWidth, leftCollapsed, rightCollapsed }));
+    } catch { /* workspace preferences are optional */ }
+  }, [leftWidth, rightWidth, leftCollapsed, rightCollapsed]);
   const commit = (next: PageNode[]) => {
     setHistory(h => [...h.slice(-49), nodes]);
     setFuture([]);
@@ -186,7 +239,12 @@ export default function App() {
   function resetWidth(side: "left" | "right") { side === "left" ? setLeftWidth(276) : setRightWidth(310); }
   function onDrop(e: React.DragEvent, targetId: string | null) {
     e.preventDefault();
-    const id = e.dataTransfer.getData("text/sytely-node") || draggingId;
+    const id = e.dataTransfer.getData("text/sytely-node") || (draggingId && nodes.some(n => n.id === draggingId) ? draggingId : null);
+    const draggedType = e.dataTransfer.getData("text/sytely-type");
+    if (!id && draggedType && ["heading", "paragraph", "button", "section", "image", "feature", "container"].includes(draggedType)) {
+      addNode(draggedType as NodeKind);
+      return;
+    }
     if (!id) return;
     const node = nodes.find(n => n.id === id);
     if (!node || id === targetId) return;
@@ -225,7 +283,7 @@ export default function App() {
       : node.type === "button" ? <button className="site-cta" style={style} onClick={e => { e.stopPropagation(); if (!preview) setSelectedId(node.id); else setToast("Preview interaction: button clicked"); }}>{node.text}</button>
       : node.type === "image" ? <div className="image-placeholder" style={style}><Image size={24}/><span>{node.text}</span><small>Choose image in properties</small></div>
       : node.type === "feature" ? <div className="feature-placeholder" style={style}><span className="feature-icon"><Sparkles size={17}/></span><p>{node.text}</p></div>
-      : <div className="container-placeholder" style={style}>{node.type === "section" ? childrenOf(node.id).map(renderElement) : node.text || <span className="drop-hint">Container · drop elements here</span>}</div>;
+      : <div className="container-placeholder" style={style}>{(node.type === "section" || node.type === "container") ? (childrenOf(node.id).length ? childrenOf(node.id).map(renderElement) : node.text || <span className="drop-hint">Container · drop elements here</span>) : node.text}</div>;
     if (node.type === "section") return <section key={node.id} className={`site-section selectable ${isSelected && !preview ? "selected-element" : ""} ${showGuides && !preview ? "guide-visible" : ""}`} onClick={e => { e.stopPropagation(); if (!preview) setSelectedId(node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}</section>;
     return <div key={node.id} className={`selectable node-wrap ${isSelected && !preview ? "selected-element" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDoubleClick={e => { e.stopPropagation(); if (node.type === "heading" || node.type === "paragraph") (e.currentTarget.querySelector("[contenteditable=true]") as HTMLElement | null)?.focus(); }}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</div>;
   };
@@ -258,7 +316,7 @@ export default function App() {
 
   const canvasWidth = viewport === "desktop" ? "100%" : viewport === "tablet" ? "768px" : "390px";
   return <div className={`app-shell ${preview ? "preview-mode" : ""} ${backendSize !== "inspector" && inspector === "Backend" ? `backend-${backendSize}` : ""}`}>
-    <header className="topbar"><div className="brand-lockup"><div className="brand-mark"><Shapes size={19}/></div><span className="brand-name">sytely</span><span className="brand-divider"/><button className="project-switcher" onClick={() => setToast("Project switcher coming soon")}>My Website <ChevronDown size={13}/></button></div><div className="topbar-centre"><span className={`save-indicator ${saveState}`}><span/>{savedLabel}</span></div><div className="topbar-actions"><button className="icon-button desktop-only" title="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!history.length}><Undo2 size={16}/></button><button className="icon-button desktop-only" title="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!future.length}><Redo2 size={16}/></button><span className="topbar-divider desktop-only"/><button className={`preview-button ${preview ? "is-active" : ""}`} onClick={() => { setPreview(!preview); setMobilePanel(null); }}><Eye size={15}/><span>{preview ? "Edit" : "Preview"}</span></button><button className="publish-button" onClick={() => setToast("Publishing is not connected yet. Your project is saved locally.")}><Upload size={14}/><span>Publish</span></button><button className="avatar-button" title="Account menu">S</button></div></header>
+    <header className="topbar"><div className="brand-lockup"><div className="brand-mark"><Shapes size={19}/></div><span className="brand-name">sytely</span><span className="brand-divider"/><button className="project-switcher" onClick={() => setToast("Project switcher coming soon")}>My Website <ChevronDown size={13}/></button></div><div className="topbar-centre"><span className={`save-indicator ${saveState}`}><span/>{savedLabel}</span></div><div className="topbar-actions"><button className="icon-button desktop-only" title="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!history.length}><Undo2 size={16}/></button><button className="icon-button desktop-only" title="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!future.length}><Redo2 size={16}/></button><span className="topbar-divider desktop-only"/><button className={`preview-button ${preview ? "is-active" : ""}`} onClick={() => { setPreview(!preview); setMobilePanel(null); }}><Eye size={15}/><span>{preview ? "Edit" : "Preview"}</span></button><button className="publish-button" onClick={() => setToast("Publishing is not connected yet. Export or deploy the production build using the README guide.")}><Upload size={14}/><span>Publish</span></button><button className="avatar-button" title="Account menu">S</button></div></header>
     <main className={`editor-layout ${preview ? "preview-layout" : ""}`}>
       {!preview && <>{rail("left", leftCollapsed, setLeftCollapsed)}{!leftCollapsed && <><aside className={`workspace-panel ${mobilePanel === "left" ? "mobile-open" : ""}`} style={{ "--panel-width": `${leftWidth}px` } as React.CSSProperties}>{renderWorkspace()}</aside><div className="resize-handle left-resize" role="separator" aria-label="Resize left panel" aria-orientation="vertical" tabIndex={0} onMouseDown={e => changeWorkspaceSize("left", e)} onDoubleClick={() => resetWidth("left")} onKeyDown={e => { if (e.key === "ArrowLeft") setLeftWidth(w => Math.max(200, w - 12)); if (e.key === "ArrowRight") setLeftWidth(w => Math.min(480, w + 12)); }}/></>}</>}
       <section className={`canvas-workspace ${preview ? "canvas-preview" : ""}`}><div className="canvas-toolbar"><div className="canvas-page-control"><button className="page-dropdown" onClick={() => setToast("Home page selected")}><FileText size={14}/><span>{pageName}</span><ChevronDown size={12}/></button><span className="toolbar-slash">/</span><span className="toolbar-muted">Website</span></div><div className="canvas-tools"><div className="viewport-switcher"><button title="Desktop viewport" aria-label="Desktop viewport" className={viewport === "desktop" ? "active" : ""} onClick={() => setViewport("desktop")}><Monitor size={15}/></button><button title="Tablet viewport" aria-label="Tablet viewport" className={viewport === "tablet" ? "active" : ""} onClick={() => setViewport("tablet")}><Tablet size={15}/></button><button title="Mobile viewport" aria-label="Mobile viewport" className={viewport === "mobile" ? "active" : ""} onClick={() => setViewport("mobile")}><Smartphone size={15}/></button></div><span className="toolbar-divider"/><button className="zoom-control" onClick={() => setZoom(z => Math.max(50, z - 10))} title="Zoom out">−</button><button className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</button><button className="zoom-control" onClick={() => setZoom(z => Math.min(150, z + 10))} title="Zoom in">+</button><span className="toolbar-divider"/><button className={`icon-button canvas-tool-button ${showGuides ? "tool-active" : ""}`} title="Toggle layout guides" onClick={() => setShowGuides(!showGuides)}><Grid2X2 size={15}/></button><button className="icon-button canvas-tool-button" title="Fit canvas to screen" onClick={() => { setZoom(100); setViewport("desktop"); }}><MaximizeIcon/></button></div></div>
