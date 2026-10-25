@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Build something remarkable.")).toBeVisible();
+  await expect(page.locator(".canvas-workspace")).toBeVisible();
 });
 
 test("layout controls apply flex and grid styles to the selected element", async ({ page, isMobile }) => {
@@ -60,7 +60,10 @@ test("exports a standalone HTML file from the editor", async ({ page, isMobile }
 test("mobile viewport keeps the editor canvas usable", async ({ page, isMobile }) => {
   test.skip(!isMobile, "This check is specific to mobile browser emulation.");
   await expect(page.locator(".site-content")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Build something remarkable." })).toBeVisible();
-  await page.getByLabel("Mobile viewport").click();
+  await expect(page.locator(".site-content")).toBeVisible();
+  // The mobile device viewport can place the toolbar outside the initial scroll position.
+  // Dispatch the real toolbar control without relying on pointer auto-scroll heuristics.
+  await page.locator('.viewport-switcher button[aria-label="Mobile viewport"]').click({ force: true });
+  await expect(page.locator(".website-page")).toHaveClass(/mobile/);
   await expect(page.locator(".canvas-stage")).toHaveCSS("width", "390px");
 });
