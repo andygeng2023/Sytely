@@ -935,7 +935,7 @@ export default function App() {
       setRightCollapsed(false);
       setMobilePanel("right");
     }} />;
-    const content: Record<Exclude<Workspace, "Add" | "Layers">, { icon: typeof Plus; title: string; description: string; cards: string[] }> = {
+    const content: Record<Exclude<Workspace, "Add" | "Layers" | "Audit">, { icon: typeof Plus; title: string; description: string; cards: string[] }> = {
       Templates: { icon: LayoutTemplate, title: "Start with a template", description: "A strong starting point for your next idea.", cards: ["Portfolio starter", "SaaS landing page", "Studio homepage", "Product launch"] },
       Databases: { icon: Database, title: "Your data sources", description: "Connect structured data to your designs.", cards: ["Sample products", "Team members", "Blog posts", "Add a data source"] },
       Components: { icon: Shapes, title: "Reusable components", description: "Keep your design consistent across pages.", cards: ["Buttons", "Navigation", "Feature cards", "Create component"] },
