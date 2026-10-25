@@ -157,7 +157,9 @@ export default function PublishedSite({ slug }: { slug: string }) {
   const responsiveCss = nodes.flatMap(node => (["tablet", "mobile"] as const).map(breakpoint => {
     const override = cssValue(node.responsive?.[breakpoint]);
     const className = node.id.replace(/[^a-zA-Z0-9_-]/g, "");
-    return override ? `@${breakpoint === "tablet" ? "media (max-width: 900px)" : "media (max-width: 600px)"}{.published-node-${className}{${override}}}` : "";
+    if (!override) return "";
+    const responsiveDeclarations = override.split(";").filter(Boolean).map(declaration => `${declaration} !important`).join(";");
+    return `@${breakpoint === "tablet" ? "media (max-width: 900px)" : "media (max-width: 600px)"}{.published-node-${className}{${responsiveDeclarations}}}`;
   })).filter(Boolean).join("\n");
   const renderNode = (node: SiteNode): ReactNode => {
     const styles = node.styles ?? {};
