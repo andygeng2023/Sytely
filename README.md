@@ -27,7 +27,7 @@ Project: `Sytely Production` (`syylksyuulzljivcvopo`), region `eu-west-1`.
 
 The applied database migration creates `public.sytely_projects`, owner-based RLS policies, and a published-site RPC. Anonymous users can read only published snapshots; draft documents and owner identifiers are not granted to the anonymous role. The database security advisor was checked after applying the policy changes.
 
-The editor supports email/password sign-in and sign-up from **Cloud account**. While signed in, the current document is automatically saved to the user's cloud project. **Publish** stores a public snapshot; the resulting link uses `?site=<slug>` on the same frontend host.
+The editor supports email/password sign-in and sign-up from **Cloud account**. While signed in, the current document is automatically saved to the selected cloud project. The cloud dashboard lists recent projects, supports search, opening, creating, and deleting projects, and shows draft/published status. **Publish** stores a public snapshot; the resulting link uses `?site=<slug>` on the same frontend host.
 
 Before using real accounts, open Supabase Dashboard → **Authentication → URL Configuration** and set:
 - **Site URL** to the deployed editor URL, for example `https://andygeng2023.github.io/Sytely/`.
@@ -53,7 +53,7 @@ Upload the **contents of `dist/`** to the host's web root (often `htdocs` or `pu
 
 ## Current limitations
 
-This is an early-stage visual editor, not yet a fully production-ready website-builder product. The cloud layer currently saves one active project per browser profile and does not yet provide a project dashboard, switch/load/delete project flows, custom domains, image uploads, a real export pipeline, multi-page routing, collaboration, or executable backend/event blocks. The published renderer supports the current node schema, not arbitrary custom HTML or application code.
+This is an early-stage visual editor, not yet a fully production-ready website-builder product. The cloud layer now supports multiple owner-scoped projects with a dashboard for creating, switching, and deleting drafts. Remaining gaps include custom domains, a hosted media library, a managed CMS, team collaboration and permissions, version history, form handling, analytics, and production-grade SEO controls. Static HTML export works for the current schema, but it is not yet a full deployment pipeline. The published renderer supports the current node schema, not arbitrary custom HTML or application code.
 
 The Publish action stores a snapshot in Supabase and renders it at a query-string URL on the same host; it does not generate a standalone export or a separate custom-domain site. Test and build status must be confirmed in GitHub Actions before merging or relying on the deployment. Do not store secrets or sensitive personal information in page content.
 
