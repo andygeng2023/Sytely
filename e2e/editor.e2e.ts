@@ -19,7 +19,7 @@ test("layout controls apply flex and grid styles to the selected element", async
   await page.getByLabel("Layout display").selectOption("grid");
   await page.getByLabel("Grid columns").selectOption("3");
   await expect(sectionLayout).toHaveCSS("display", "grid");
-  await expect(sectionLayout).toHaveAttribute("style", /grid-template-columns:\\s*repeat\\(3/);
+  await expect(sectionLayout).toHaveAttribute("style", /grid-template-columns:\s*repeat\(3/);
 });
 
 test("saves and inserts a reusable component with unique element IDs", async ({ page, isMobile }) => {
@@ -54,7 +54,7 @@ test("exports a standalone HTML file from the editor", async ({ page, isMobile }
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export site" }).click();
   const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/\\.html$/i);
+  expect(download.suggestedFilename()).toMatch(/\.html$/i);
 });
 
 test("mobile viewport keeps the editor canvas usable", async ({ page, isMobile }) => {
