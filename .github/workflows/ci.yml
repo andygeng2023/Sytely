@@ -17,13 +17,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install dependencies
         run: npm install
-      - name: Inspect dependency audit
-        run: |
-          npm audit --json > /tmp/npm-audit.json || true
-          node -e 'const a=require("/tmp/npm-audit.json"); console.log(JSON.stringify({metadata:a.metadata?.vulnerabilities, vulnerabilities:Object.entries(a.vulnerabilities??{}).map(([name,v])=>({name,severity:v.severity,range:v.range,fixAvailable:v.fixAvailable,via:v.via.map(x=>typeof x==="string"?x:x.title)}))},null,2))'
+      - name: Audit dependencies
+        run: npm audit
       - name: Run editor smoke tests
         run: npm test
       - name: Type-check and build
