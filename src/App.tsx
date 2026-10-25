@@ -210,9 +210,11 @@ export default function App() {
     setSavedLabel("Unsaved changes");
   };
   function undo() {
+    lastCommitAt.current = 0;
     setHistory(h => { if (!h.length) return h; const prev = h[h.length - 1]; setFuture(f => [nodes, ...f]); setNodes(prev); setSaveState("unsaved"); setSavedLabel("Unsaved changes"); return h.slice(0, -1); });
   }
   function redo() {
+    lastCommitAt.current = 0;
     setFuture(f => { if (!f.length) return f; const next = f[0]; setHistory(h => [...h, nodes]); setNodes(next); setSaveState("unsaved"); setSavedLabel("Unsaved changes"); return f.slice(1); });
   }
   function addNode(type: NodeKind, name?: string, parentOverride?: string | null) {
@@ -346,6 +348,7 @@ export default function App() {
   function resetWidth(side: "left" | "right") { side === "left" ? setLeftWidth(276) : setRightWidth(310); }
   function onDrop(e: React.DragEvent, targetId: string | null) {
     e.preventDefault();
+    e.stopPropagation();
     const id = e.dataTransfer.getData("text/sytely-node") || (draggingId && nodes.some(n => n.id === draggingId) ? draggingId : null);
     const draggedType = e.dataTransfer.getData("text/sytely-type");
     if (!id && draggedType && ["heading", "paragraph", "button", "section", "image", "feature", "container"].includes(draggedType)) {
