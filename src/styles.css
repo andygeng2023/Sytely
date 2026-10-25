@@ -55,3 +55,14 @@
 .published-page-nav a{color:inherit;text-decoration:none;font-size:13px}
 .published-page-nav a[aria-current=page]{color:var(--accent);font-weight:700}
 @media(max-width:680px){.export-button span{display:none}.export-button{width:32px;padding:0}.page-actions button{font-size:10px;padding:6px}.published-page-nav{gap:8px}}
+
+
+/* Reusable component library */
+.component-library-row{display:flex;align-items:center;gap:5px;min-height:54px;padding:4px 8px}
+.component-insert{display:flex;align-items:center;gap:9px;flex:1;min-width:0;border:0;background:transparent;text-align:left;color:#5c5d73;font-size:11px}
+.component-insert>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.component-insert small{display:block;color:#9899ab;font-size:9px;margin-top:4px}
+.component-insert:hover{color:#5d53cb}
+.component-library-row>.page-list-menu{flex:none}
+.site-content [style*="display: grid"],.site-content [style*="display: grid"]>*{min-width:0}
+.site-content [style*="display: flex"]>*{min-width:0}

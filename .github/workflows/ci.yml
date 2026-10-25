@@ -26,3 +26,9 @@ jobs:
         run: npm test
       - name: Type-check and build
         run: npm run build
+      - name: Install Playwright test runner
+        run: npm install --no-save --package-lock=false @playwright/test
+      - name: Install browser engines
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Run browser end-to-end tests
+        run: npx playwright test
