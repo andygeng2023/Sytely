@@ -357,6 +357,45 @@ export default function App() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const selected = nodes.find(n => n.id === selectedId);
   const activePage = pages.find(page => page.id === activePageId) ?? pages[0];
+
+  function loadCloudProject(project: { id: string; name: string; document: unknown }) {
+    const document = project.document && typeof project.document === "object"
+      ? project.document as { pages?: unknown; nodes?: unknown; activePageId?: unknown }
+      : {};
+    const loadedPages = isPageSnapshotArray(document.pages)
+      ? document.pages
+      : [{ id: "page-home", name: "Home", nodes: isPageNodeArray(document.nodes) ? document.nodes : initialNodes }];
+    const loadedActive = loadedPages.find(page => page.id === document.activePageId) ?? loadedPages[0];
+    setPages(loadedPages);
+    setActivePageId(loadedActive.id);
+    setNodes(loadedActive.nodes);
+    setPageName(loadedActive.name);
+    setProjectName(project.name || "My Website");
+    setSelectedId(loadedActive.nodes[0]?.id ?? "");
+    setHistory([]);
+    setFuture([]);
+    setRuntimeOverrides({});
+    setPreview(false);
+    setSaveState("saved");
+    setSavedLabel("Loaded from cloud");
+  }
+
+  function createCloudProject() {
+    const freshNodes = initialNodes.map(node => ({ ...node, styles: { ...node.styles } }));
+    const freshPage = { id: "page-home", name: "Home", nodes: freshNodes };
+    setPages([freshPage]);
+    setActivePageId(freshPage.id);
+    setNodes(freshNodes);
+    setPageName("Home");
+    setProjectName("Untitled website");
+    setSelectedId("hero-button");
+    setHistory([]);
+    setFuture([]);
+    setRuntimeOverrides({});
+    setPreview(false);
+    setSaveState("unsaved");
+    setSavedLabel("New project");
+  }
   const childrenOf = useCallback((parentId: string | null) => nodes.filter(n => n.parentId === parentId), [nodes]);
   const childNodes = useMemo(() => nodes.filter(n => n.parentId === selectedId), [nodes, selectedId]);
 
@@ -912,7 +951,7 @@ export default function App() {
 
   const canvasWidth = viewport === "desktop" ? "100%" : viewport === "tablet" ? "768px" : "390px";
   return <div className={`app-shell ${preview ? "preview-mode" : ""} ${backendSize !== "inspector" && inspector === "Backend" ? `backend-${backendSize}` : ""}`}>
-    <header className="topbar"><div className="brand-lockup"><div className="brand-mark"><Shapes size={19}/></div><span className="brand-name">sytely</span><span className="brand-divider"/><button className="project-switcher" title="Rename website" onClick={() => { const name = window.prompt("Website name", projectName); if (name?.trim()) setProjectName(name.trim().slice(0, 80)); }}>{projectName} <ChevronDown size={13}/></button></div><div className="topbar-centre"><span className={`save-indicator ${saveState}`}><span/>{savedLabel}</span></div><div className="topbar-actions"><button className="icon-button desktop-only" title="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!history.length}><Undo2 size={16}/></button><button className="icon-button desktop-only" title="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!future.length}><Redo2 size={16}/></button><span className="topbar-divider desktop-only"/><button className={`preview-button ${preview ? "is-active" : ""}`} onClick={() => { setPreview(!preview); setRuntimeOverrides({}); setMobilePanel(null); }}><Eye size={15}/><span>{preview ? "Edit" : "Preview"}</span></button><button className="export-button" onClick={exportSiteHtml} title="Download a standalone HTML site with all pages"><ExternalLink size={14}/><span>Export site</span></button><button className="publish-button" onClick={() => window.dispatchEvent(new Event("sytely:publish"))}><Upload size={14}/><span>Publish</span></button><CloudAccount nodes={nodes} pages={pages} activePageId={activePageId} pageName={projectName} onToast={setToast} /><button className="avatar-button" title="Account menu" onClick={() => document.querySelector<HTMLButtonElement>(".cloud-account-button")?.click()}>S</button></div></header>
+    <header className="topbar"><div className="brand-lockup"><div className="brand-mark"><Shapes size={19}/></div><span className="brand-name">sytely</span><span className="brand-divider"/><button className="project-switcher" title="Rename website" onClick={() => { const name = window.prompt("Website name", projectName); if (name?.trim()) setProjectName(name.trim().slice(0, 80)); }}>{projectName} <ChevronDown size={13}/></button></div><div className="topbar-centre"><span className={`save-indicator ${saveState}`}><span/>{savedLabel}</span></div><div className="topbar-actions"><button className="icon-button desktop-only" title="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!history.length}><Undo2 size={16}/></button><button className="icon-button desktop-only" title="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!future.length}><Redo2 size={16}/></button><span className="topbar-divider desktop-only"/><button className={`preview-button ${preview ? "is-active" : ""}`} onClick={() => { setPreview(!preview); setRuntimeOverrides({}); setMobilePanel(null); }}><Eye size={15}/><span>{preview ? "Edit" : "Preview"}</span></button><button className="export-button" onClick={exportSiteHtml} title="Download a standalone HTML site with all pages"><ExternalLink size={14}/><span>Export site</span></button><button className="publish-button" onClick={() => window.dispatchEvent(new Event("sytely:publish"))}><Upload size={14}/><span>Publish</span></button><CloudAccount nodes={nodes} pages={pages} activePageId={activePageId} pageName={projectName} onToast={setToast} onLoadProject={loadCloudProject} onCreateProject={createCloudProject} /><button className="avatar-button" title="Account menu" onClick={() => document.querySelector<HTMLButtonElement>(".cloud-account-button")?.click()}>S</button></div></header>
     <main className={`editor-layout ${preview ? "preview-layout" : ""}`}>
       {!preview && <>{rail("left", leftCollapsed, setLeftCollapsed)}{!leftCollapsed && <><aside className={`workspace-panel ${mobilePanel === "left" ? "mobile-open" : ""}`} style={{ "--panel-width": `${leftWidth}px` } as React.CSSProperties}>{renderWorkspace()}</aside><div className="resize-handle left-resize" role="separator" aria-label="Resize left panel" aria-orientation="vertical" tabIndex={0} onMouseDown={e => changeWorkspaceSize("left", e)} onDoubleClick={() => resetWidth("left")} onKeyDown={e => { if (e.key === "ArrowLeft") setLeftWidth(w => Math.max(200, w - 12)); if (e.key === "ArrowRight") setLeftWidth(w => Math.min(480, w + 12)); }}/></>}</>}
       <section className={`canvas-workspace ${preview ? "canvas-preview" : ""}`}><div className="canvas-toolbar"><div className="canvas-page-control"><button className="page-dropdown" title="Rename page" onClick={() => { const name = window.prompt("Page name", pageName); if (name?.trim()) setPageName(name.trim().slice(0, 80)); }}><FileText size={14}/><span>{pageName}</span><ChevronDown size={12}/></button><span className="toolbar-slash">/</span><span className="toolbar-muted">Website</span></div><div className="canvas-tools"><div className="viewport-switcher"><button title="Desktop viewport" aria-label="Desktop viewport" className={viewport === "desktop" ? "active" : ""} onClick={() => setViewport("desktop")}><Monitor size={15}/></button><button title="Tablet viewport" aria-label="Tablet viewport" className={viewport === "tablet" ? "active" : ""} onClick={() => setViewport("tablet")}><Tablet size={15}/></button><button title="Mobile viewport" aria-label="Mobile viewport" className={viewport === "mobile" ? "active" : ""} onClick={() => setViewport("mobile")}><Smartphone size={15}/></button></div><span className="toolbar-divider"/><button className="zoom-control" onClick={() => setZoom(z => Math.max(50, z - 10))} title="Zoom out">−</button><button className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</button><button className="zoom-control" onClick={() => setZoom(z => Math.min(150, z + 10))} title="Zoom in">+</button><span className="toolbar-divider"/><button className={`icon-button canvas-tool-button ${showGuides ? "tool-active" : ""}`} title="Toggle layout guides" onClick={() => setShowGuides(!showGuides)}><Grid2X2 size={15}/></button><button className="icon-button canvas-tool-button" title="Fit canvas to screen" onClick={() => { setZoom(100); setViewport("desktop"); }}><MaximizeIcon/></button></div></div>
