@@ -34,12 +34,20 @@ create policy "Owners can delete their projects"
   on public.sytely_projects for delete to authenticated
   using ((select auth.uid()) = owner_id);
 
+-- Anonymous reads are restricted to published rows and public snapshot columns only.
+drop policy if exists "Public can read published site snapshots" on public.sytely_projects;
+create policy "Public can read published site snapshots"
+  on public.sytely_projects for select to anon
+  using (is_published = true);
+grant select (name, slug, published_document, published_at, is_published)
+  on public.sytely_projects to anon;
+
 -- Public site reads expose only the immutable publication snapshot, not draft data.
 create or replace function public.get_sytely_published_site(site_slug text)
 returns jsonb
 language sql
 stable
-security definer
+security invoker
 set search_path = ''
 as $$
   select jsonb_build_object(
