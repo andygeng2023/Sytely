@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { supabase } from "../lib/supabase";
 
 type SiteNode = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; styles?: Record<string, string | number | undefined> };
@@ -23,9 +24,9 @@ export default function PublishedSite({ slug }: { slug: string }) {
   if (!site) return <main className="published-message"><p>Loading published site…</p></main>;
   const nodes = Array.isArray(site.document?.nodes) ? site.document.nodes : [];
   const children = (parentId: string | null) => nodes.filter(node => node.parentId === parentId && node.visible !== false);
-  const renderNode = (node: SiteNode): React.ReactNode => {
+  const renderNode = (node: SiteNode): ReactNode => {
     const styles = node.styles ?? {};
-    const style: React.CSSProperties = {
+    const style: CSSProperties = {
       color: typeof styles.color === "string" ? styles.color : undefined,
       background: typeof styles.background === "string" ? styles.background : undefined,
       fontSize: typeof styles.fontSize === "number" ? styles.fontSize : undefined,
