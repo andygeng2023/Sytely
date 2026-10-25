@@ -18,7 +18,7 @@ test("layout controls apply flex and grid styles to the selected element", async
   await page.getByLabel("Layout display").selectOption("grid");
   await page.getByLabel("Grid columns").selectOption("3");
   await expect(sectionLayout).toHaveCSS("display", "grid");
-  await expect(sectionLayout).toHaveCSS("grid-template-columns", /repeat\(3/);
+  await expect(sectionLayout).toHaveAttribute("style", /grid-template-columns:\s*repeat\(3/);
 });
 
 test("saves and inserts a reusable component with unique element IDs", async ({ page }) => {
