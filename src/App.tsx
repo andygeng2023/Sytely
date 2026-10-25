@@ -59,19 +59,53 @@ const elementGroups: { label: string; icon: typeof Plus; items: { label: string;
 ];
 const uid = () => `node-${Math.random().toString(36).slice(2, 9)}`;
 
+function safeLink(value?: string): string | undefined {
+  if (!value) return undefined;
+  const url = value.trim();
+  if (/^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/)/i.test(url) && !/^\/\//.test(url)) return url;
+  return undefined;
+}
+
+function safeImageSource(value?: string): string | undefined {
+  if (!value) return undefined;
+  const url = value.trim();
+  if (/^https?:\/\//i.test(url) || /^(\/|\.\/|\.\.\/)/.test(url) && !url.startsWith("//")) return url;
+  return undefined;
+}
+
 function isPageNodeArray(value: unknown): value is PageNode[] {
-  if (!Array.isArray(value)) return false;
+  if (!Array.isArray(value) || value.length > 2000) return false;
   const allowed = new Set<NodeKind>(["heading", "paragraph", "button", "section", "image", "feature", "container"]);
+  const allowedSemantics = new Set(["default", "h1", "h2", "h3", "button", "section"]);
   const ids = new Set<string>();
   for (const candidate of value) {
     if (!candidate || typeof candidate !== "object") return false;
     const node = candidate as Partial<PageNode>;
-    if (typeof node.id !== "string" || !node.id || ids.has(node.id) ||
-        typeof node.name !== "string" || typeof node.text !== "string" ||
+    const styles = node.styles as Record<string, unknown> | undefined;
+    if (typeof node.id !== "string" || !node.id || node.id.length > 120 || ids.has(node.id) ||
+        typeof node.name !== "string" || node.name.length > 160 ||
+        typeof node.text !== "string" || node.text.length > 20000 ||
         typeof node.type !== "string" || !allowed.has(node.type as NodeKind) ||
         !(node.parentId === null || typeof node.parentId === "string") ||
         typeof node.visible !== "boolean" || typeof node.locked !== "boolean" ||
-        !node.styles || typeof node.styles !== "object" || Array.isArray(node.styles)) return false;
+        !styles || typeof styles !== "object" || Array.isArray(styles) ||
+        (node.href !== undefined && (typeof node.href !== "string" || node.href.length > 2048)) ||
+        (node.src !== undefined && (typeof node.src !== "string" || node.src.length > 2048)) ||
+        (node.ariaLabel !== undefined && (typeof node.ariaLabel !== "string" || node.ariaLabel.length > 300)) ||
+        (node.semantic !== undefined && (typeof node.semantic !== "string" || !allowedSemantics.has(node.semantic)))) return false;
+    for (const key of ["color", "background"] as const) {
+      const color = styles[key];
+      if (color !== undefined && (typeof color !== "string" || !/^#[0-9a-f]{3,8}$/i.test(color))) return false;
+    }
+    if (styles.align !== undefined && !["left", "center", "right"].includes(String(styles.align))) return false;
+    if (styles.width !== undefined && !["Auto", "100%", "Fit content", "320px"].includes(String(styles.width))) return false;
+    if (styles.height !== undefined && !["Auto", "100%", "320px", "480px"].includes(String(styles.height))) return false;
+    for (const key of ["fontSize", "padding", "radius"] as const) {
+      const number = styles[key];
+      const max = key === "fontSize" ? 128 : key === "padding" ? 200 : 100;
+      if (number !== undefined && (typeof number !== "number" || !Number.isFinite(number) || number < 0 || number > max)) return false;
+    }
+    if (node.openInNewTab !== undefined && typeof node.openInNewTab !== "boolean") return false;
     ids.add(node.id);
   }
   for (const candidate of value as PageNode[]) {
@@ -457,8 +491,8 @@ export default function App() {
     const HeadingTag = node.semantic === "h2" ? "h2" : node.semantic === "h3" ? "h3" : "h1";
     const inner = node.type === "heading" ? <HeadingTag style={style} aria-label={node.ariaLabel || undefined} contentEditable={!preview && !node.locked} suppressContentEditableWarning onBlur={e => { if (e.currentTarget.textContent !== node.text && !node.locked) commit(nodes.map(n => n.id === node.id ? { ...n, text: e.currentTarget.textContent ?? "" } : n)); }} onClick={e => e.stopPropagation()}>{node.text}</HeadingTag>
        : node.type === "paragraph" ? <p style={style} aria-label={node.ariaLabel || undefined} contentEditable={!preview && !node.locked} suppressContentEditableWarning onBlur={e => { if (e.currentTarget.textContent !== node.text && !node.locked) commit(nodes.map(n => n.id === node.id ? { ...n, text: e.currentTarget.textContent ?? "" } : n)); }} onClick={e => e.stopPropagation()}>{node.text}</p>
-      : node.type === "button" ? <a className="site-cta" style={style} href={preview ? node.href || undefined : undefined} aria-label={node.ariaLabel || undefined} target={node.openInNewTab ? "_blank" : undefined} rel={node.openInNewTab ? "noreferrer" : undefined} onClick={e => { if (!preview) { e.preventDefault(); e.stopPropagation(); if (!node.locked) setSelectedId(node.id); } else if (!node.href) { e.preventDefault(); } }}>{node.text}</a>
-      : node.type === "image" ? node.src ? <img className="image-placeholder" style={{ ...style, objectFit: "cover", display: "block" }} src={node.src} alt={node.text} aria-label={node.ariaLabel || undefined} /> : <div className="image-placeholder" style={style}><Image size={24}/><span>{node.text}</span><small>Add an image URL in Properties</small></div>
+      : node.type === "button" ? <a className="site-cta" style={style} href={preview ? safeLink(node.href) : undefined} aria-label={node.ariaLabel || undefined} target={node.openInNewTab ? "_blank" : undefined} rel={node.openInNewTab ? "noreferrer" : undefined} onClick={e => { if (!preview) { e.preventDefault(); e.stopPropagation(); if (!node.locked) setSelectedId(node.id); } else if (!node.href) { e.preventDefault(); } }}>{node.text}</a>
+      : node.type === "image" ? safeImageSource(node.src) ? <img className="image-placeholder" style={{ ...style, objectFit: "cover", display: "block" }} src={safeImageSource(node.src)} alt={node.text} aria-label={node.ariaLabel || undefined} /> : <div className="image-placeholder" style={style}><Image size={24}/><span>{node.text}</span><small>Add an image URL in Properties</small></div>
       : node.type === "feature" ? <div className="feature-placeholder" style={style} aria-label={node.ariaLabel || undefined}><span className="feature-icon"><Sparkles size={17}/></span><p>{node.text}</p></div>
       : <div className="container-placeholder" style={style} aria-label={node.ariaLabel || undefined}>{(node.type === "section" || node.type === "container") ? (childrenOf(node.id).length ? childrenOf(node.id).map(renderElement) : node.text || <span className="drop-hint">Container · drop elements here</span>) : node.text}</div>;
     if (node.type === "section") return <section key={node.id} aria-label={node.ariaLabel || undefined} className={`site-section selectable ${isSelected && !preview ? "selected-element" : ""} ${showGuides && !preview ? "guide-visible" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragEnd={() => setDraggingId(null)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</section>;

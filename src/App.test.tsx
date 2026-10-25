@@ -148,4 +148,31 @@ describe("Sytely Studio editor smoke tests", () => {
     expect(host.querySelector(".site-content .site-cta")?.getAttribute("href")).toBe("https://example.com");
   });
 
+  it("does not allow script URLs to become preview links", async () => {
+    window.localStorage.setItem("sytely:document:v1", JSON.stringify([
+      { id: "unsafe-button", type: "button", name: "Unsafe link", text: "Open", parentId: null, visible: true, locked: false, href: "javascript:alert(1)", styles: {} },
+    ]));
+    await act(async () => { root.render(createElement(App)); });
+    await act(async () => { (host.querySelector(".preview-button") as HTMLButtonElement).click(); });
+    expect(host.querySelector(".site-content .site-cta")?.getAttribute("href")).toBeNull();
+  });
+
+  it("rejects malformed style values from local draft storage", async () => {
+    window.localStorage.setItem("sytely:document:v1", JSON.stringify([
+      { id: "broken-style", type: "heading", name: "Broken", text: "Invalid style", parentId: null, visible: true, locked: false, styles: { fontSize: {} } },
+    ]));
+    await act(async () => { root.render(createElement(App)); });
+    expect(host.textContent).toContain("Build something remarkable.");
+    expect(host.textContent).not.toContain("Invalid style");
+  });
+
+  it("does not render unsafe image URL schemes", async () => {
+    window.localStorage.setItem("sytely:document:v1", JSON.stringify([
+      { id: "unsafe-image", type: "image", name: "Unsafe image", text: "Alternative text", parentId: null, visible: true, locked: false, src: "javascript:alert(1)", styles: {} },
+    ]));
+    await act(async () => { root.render(createElement(App)); });
+    expect(host.querySelector('img[src^="javascript:"]')).toBeNull();
+    expect(host.textContent).toContain("Add an image URL in Properties");
+  });
+
 });
