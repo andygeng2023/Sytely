@@ -289,6 +289,7 @@ export default function App() {
     const draggedType = e.dataTransfer.getData("text/sytely-type");
     if (!id && draggedType && ["heading", "paragraph", "button", "section", "image", "feature", "container"].includes(draggedType)) {
       const target = targetId ? nodes.find(n => n.id === targetId) : undefined;
+      if (target?.locked) { setToast("Unlock this element before dropping content into it"); setDraggingId(null); return; }
       const parentId = target && (target.type === "section" || target.type === "container")
         ? target.id
         : target?.parentId ?? null;
@@ -296,24 +297,62 @@ export default function App() {
       setDraggingId(null);
       return;
     }
-    if (!id) return;
-    const node = nodes.find(n => n.id === id);
-    if (!node || id === targetId) return;
-    // Reject moves that would create a cycle (a node cannot be dropped into its own subtree).
-    if (targetId) {
-      let ancestor: string | null | undefined = targetId;
-      while (ancestor) {
-        if (ancestor === id) { setToast("An element cannot be moved inside itself"); setDraggingId(null); return; }
-        ancestor = nodes.find(n => n.id === ancestor)?.parentId;
+    if (!id) { setDraggingId(null); return; }
+    const moving = nodes.find(n => n.id === id);
+    const target = targetId ? nodes.find(n => n.id === targetId) : undefined;
+    if (!moving || moving.locked || id === targetId) { setDraggingId(null); return; }
+    if (target?.locked) { setToast("Unlock the target element before dropping here"); setDraggingId(null); return; }
+
+    const subtreeIds = new Set<string>([id]);
+    let foundChild = true;
+    while (foundChild) {
+      foundChild = false;
+      nodes.forEach(n => {
+        if (n.parentId && subtreeIds.has(n.parentId) && !subtreeIds.has(n.id)) {
+          subtreeIds.add(n.id);
+          foundChild = true;
+        }
+      });
+    }
+    if (targetId && subtreeIds.has(targetId)) {
+      setToast("An element cannot be moved inside itself");
+      setDraggingId(null);
+      return;
+    }
+
+    const newParentId = target && (target.type === "section" || target.type === "container")
+      ? target.id
+      : target?.parentId ?? null;
+    if (newParentId === id || (newParentId !== null && subtreeIds.has(newParentId))) {
+      setToast("An element cannot be moved inside itself");
+      setDraggingId(null);
+      return;
+    }
+
+    const moved = nodes.filter(n => subtreeIds.has(n.id)).map(n =>
+      n.id === id ? { ...n, parentId: newParentId } : n
+    );
+    const remaining = nodes.filter(n => !subtreeIds.has(n.id));
+    let insertAt = remaining.length;
+    if (target && !(target.type === "section" || target.type === "container")) {
+      const targetSubtree = new Set<string>([target.id]);
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        remaining.forEach(n => {
+          if (n.parentId && targetSubtree.has(n.parentId) && !targetSubtree.has(n.id)) {
+            targetSubtree.add(n.id);
+            expanded = true;
+          }
+        });
       }
+      const positions = remaining.map((n, i) => targetSubtree.has(n.id) ? i : -1).filter(i => i >= 0);
+      if (positions.length) insertAt = Math.max(...positions) + 1;
     }
-    if (targetId && (nodes.find(n => n.id === targetId)?.type === "section" || nodes.find(n => n.id === targetId)?.type === "container")) {
-      commit(nodes.map(n => n.id === id ? { ...n, parentId: targetId } : n));
-    } else {
-      const target = nodes.find(n => n.id === targetId);
-      commit(nodes.map(n => n.id === id ? { ...n, parentId: target?.parentId ?? null } : n));
-    }
-    setSelectedId(id); setDraggingId(null);
+    const next = [...remaining.slice(0, insertAt), ...moved, ...remaining.slice(insertAt)];
+    commit(next);
+    setSelectedId(id);
+    setDraggingId(null);
   }
 
   const rail = (side: "left" | "right", collapsed: boolean, setCollapsed: (v: boolean) => void) => (
@@ -344,8 +383,8 @@ export default function App() {
       : node.type === "image" ? <div className="image-placeholder" style={style}><Image size={24}/><span>{node.text}</span><small>Choose image in properties</small></div>
       : node.type === "feature" ? <div className="feature-placeholder" style={style}><span className="feature-icon"><Sparkles size={17}/></span><p>{node.text}</p></div>
       : <div className="container-placeholder" style={style}>{(node.type === "section" || node.type === "container") ? (childrenOf(node.id).length ? childrenOf(node.id).map(renderElement) : node.text || <span className="drop-hint">Container · drop elements here</span>) : node.text}</div>;
-    if (node.type === "section") return <section key={node.id} className={`site-section selectable ${isSelected && !preview ? "selected-element" : ""} ${showGuides && !preview ? "guide-visible" : ""}`} onClick={e => { e.stopPropagation(); if (!preview) setSelectedId(node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}</section>;
-    return <div key={node.id} className={`selectable node-wrap ${isSelected && !preview ? "selected-element" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDoubleClick={e => { e.stopPropagation(); if (node.type === "heading" || node.type === "paragraph") (e.currentTarget.querySelector("[contenteditable=true]") as HTMLElement | null)?.focus(); }}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</div>;
+    if (node.type === "section") return <section key={node.id} className={`site-section selectable ${isSelected && !preview ? "selected-element" : ""} ${showGuides && !preview ? "guide-visible" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragEnd={() => setDraggingId(null)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</section>;
+    return <div key={node.id} className={`selectable node-wrap ${isSelected && !preview ? "selected-element" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragEnd={() => setDraggingId(null)} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDoubleClick={e => { e.stopPropagation(); if (node.type === "heading" || node.type === "paragraph") (e.currentTarget.querySelector("[contenteditable=true]") as HTMLElement | null)?.focus(); }}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</div>;
   };
 
   const renderWorkspace = () => {
