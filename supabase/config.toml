@@ -1,0 +1,15 @@
+project_id = "syylksyuulzljivcvopo"
+
+[api]
+enabled = true
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[auth]
+enabled = true
+site_url = "https://andygeng2023.github.io/Sytely/"
+additional_redirect_urls = [
+  "https://andygeng2023.github.io/Sytely/",
+  "http://localhost:5173"
+]

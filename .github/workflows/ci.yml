@@ -20,6 +20,8 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm install
+      - name: Audit dependencies
+        run: npm audit
       - name: Run editor smoke tests
         run: npm test
       - name: Type-check and build
