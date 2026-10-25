@@ -112,6 +112,7 @@ export default function PublishedSite({ slug }: { slug: string }) {
   const runInteraction = (node: SiteNode, event: React.MouseEvent) => {
     const action = node.interaction;
     if (!action) return;
+    event.stopPropagation();
     if (action.action === "navigatePage") {
       const page = storedPages.find(item => item.id === action.targetPageId);
       if (!page) { event.preventDefault(); return; }
