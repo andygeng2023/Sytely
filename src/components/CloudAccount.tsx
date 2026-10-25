@@ -6,6 +6,19 @@ import { isSupabaseConfigured, supabase } from "../lib/supabase";
 type Node = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; locked: boolean; styles: Record<string, string | number | undefined> };
 type Props = { nodes: Node[]; pageName: string; onToast: (message: string) => void };
 
+async function sharePublishedSite(slug: string, onToast: (message: string) => void) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("site", slug);
+  const shareUrl = url.toString();
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+    await navigator.clipboard.writeText(shareUrl);
+    onToast(`Published. Link copied: ${shareUrl}`);
+  } catch {
+    onToast(`Published site: ${shareUrl}`);
+  }
+}
+
 export function CloudAccount({ nodes, pageName, onToast }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
@@ -72,7 +85,7 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
           if (error) throw error;
           id = data.id; setProjectId(id);
           try { window.localStorage.setItem("sytely:cloud-project:v1", id); } catch { /* optional */ }
-          onToast(`Published snapshot: ?site=${data.slug}`);
+          await sharePublishedSite(data.slug, onToast);
         } else {
           const { data: row, error: readError } = await supabase.from("sytely_projects").select("slug").eq("id", id).single();
           if (readError) throw readError;
@@ -81,7 +94,7 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
             published_document: { version: 1, nodes }, is_published: true, published_at: new Date().toISOString()
           }).eq("id", id);
           if (error) throw error;
-          onToast(`Published snapshot: ?site=${row.slug}`);
+          await sharePublishedSite(row.slug, onToast);
         }
         setStatus("Published");
       } catch (error) {
