@@ -1,21 +1,17 @@
 # Sytely Studio
 
-Sytely Studio is a React + TypeScript visual website-editor prototype. It provides an editor shell, a sample website canvas, contextual workspace/inspector panels, and browser-local draft persistence.
+Sytely Studio is a React + TypeScript visual website editor prototype with local drafts, Supabase email/password authentication, owner-scoped cloud draft storage, and a public renderer for published snapshots.
 
-## Open the editor on your computer
+## Run locally
 
-1. Install Node.js 20 or newer from https://nodejs.org/.
-2. Download or clone this repository, then open a terminal in the project folder.
-3. Run:
+Requires Node.js 20 or newer.
 
 ```bash
 npm install
 npm run dev
 ```
 
-4. Open the local URL Vite prints, usually http://localhost:5173.
-
-To verify the production bundle locally:
+For verification and a local production preview:
 
 ```bash
 npm test
@@ -23,22 +19,29 @@ npm run build
 npm run preview
 ```
 
-The preview command is for checking the production build locally, not for serving production traffic.
+The app includes the public Supabase project URL and publishable browser key as defaults. These values are designed for client-side use; authorization depends on Supabase Auth and row-level security. Never put a Supabase service-role key or other server secret in frontend code.
+
+## Supabase backend
+
+Project: `Sytely Production` (`syylksyuulzljivcvopo`), region `eu-west-1`.
+
+The applied database migration creates `public.sytely_projects`, owner-based RLS policies, and a published-site RPC. Anonymous users can read only published snapshots; draft documents and owner identifiers are not granted to the anonymous role. The database security advisor was checked after applying the policy changes.
+
+The editor supports email/password sign-in and sign-up from **Cloud account**. While signed in, the current document is automatically saved to the user's cloud project. **Publish** stores a public snapshot; the resulting link uses `?site=<slug>` on the same frontend host.
+
+Before using real accounts, open Supabase Dashboard → **Authentication → URL Configuration** and set:
+- **Site URL** to the deployed editor URL, for example `https://andygeng2023.github.io/Sytely/`.
+- **Redirect URLs** to include that deployed URL and `http://localhost:5173/**` for local development.
+
+Email confirmation settings depend on your Supabase Auth configuration. For production, configure an appropriate email provider, recovery flow, rate limits, and account policies. No service-role key is required in the browser.
 
 ## Deploy on GitHub Pages
 
-The repository includes a GitHub Actions deployment workflow. After merging the changes into `main`:
+The GitHub Actions workflow builds and deploys the static frontend on pushes to `main`. In repository **Settings → Pages**, set the source to **GitHub Actions**. The expected URL is `https://andygeng2023.github.io/Sytely/`; use it only after the workflow and Pages deployment succeed.
 
-1. Open the repository's **Settings → Pages**.
-2. Set **Build and deployment → Source** to **GitHub Actions**.
-3. Open **Actions** and watch the **Deploy Sytely to GitHub Pages** workflow.
-4. When it succeeds, open **Settings → Pages** to see the published URL. For this repository it will normally be `https://andygeng2023.github.io/Sytely/`.
-
-The workflow installs dependencies, runs smoke tests, builds the Vite app with the `/Sytely/` base path, and publishes the `dist` folder. Future pushes to `main` trigger redeployment.
+GitHub Pages serves static files. Supabase provides the remote database and authentication. This repository's Pages deployment has not been declared production-verified until the CI/build and live deployment checks pass.
 
 ## Deploy on InfinityFree or another static host
-
-Sytely's frontend can be hosted as static files. Build it for a root-domain or subdomain deployment:
 
 ```bash
 npm install
@@ -46,26 +49,20 @@ npm test
 npm run build
 ```
 
-Then upload the **contents of the generated `dist/` folder** (not the source folder) into the hosting account's web root, usually `htdocs` or `public_html`. Make sure `index.html` is directly in that web root. For a site hosted under a subdirectory, set `VITE_BASE_PATH` to that directory before building (for example, `VITE_BASE_PATH=/demo/`).
+Upload the **contents of `dist/`** to the host's web root (often `htdocs` or `public_html`). For a root domain, build with the default base path. For a subdirectory, set `VITE_BASE_PATH` to that path (for example `VITE_BASE_PATH=/demo/`). Configure the same deployed URL in Supabase Authentication → URL Configuration.
 
-You need Node.js on your own computer to build the React app; the host only serves the generated HTML, CSS and JavaScript. The current editor does not require a server-side PHP process.
+## Current limitations
 
-## Current limitations — read before production use
+This is an early-stage visual editor, not yet a fully production-ready website-builder product. The cloud layer currently saves one active project per browser profile and does not yet provide a project dashboard, switch/load/delete project flows, custom domains, image uploads, a real export pipeline, multi-page routing, collaboration, or executable backend/event blocks. The published renderer supports the current node schema, not arbitrary custom HTML or application code.
 
-This release is **not a production-ready multi-user website builder**. The editor draft is saved to the current browser's `localStorage`; it is not uploaded to a server, synced across devices, backed up remotely, or associated with a user account. Clearing browser storage can remove a draft. Export or back up important work before relying on it.
+The Publish action stores a snapshot in Supabase and renders it at a query-string URL on the same host; it does not generate a standalone export or a separate custom-domain site. Test and build status must be confirmed in GitHub Actions before merging or relying on the deployment. Do not store secrets or sensitive personal information in page content.
 
-The Publish control is not connected to a real publishing service. The backend Blocks tab is a visual prototype, not an execution engine. Data connectors, secure authentication, access controls, collaboration, asset uploads, database operations, and full accessibility/security testing are not implemented. Do not store secrets, credentials, or sensitive personal data in editor drafts.
+## Included editor capabilities
 
-## Features in this foundation
-
-- Four-area workspace with resizable/collapsible panels and keyboard-resize controls.
-- Element catalogue, shared canvas/layer node state, selection and inline text editing.
-- Element insertion, duplication, deletion, visibility/locking, drag-and-drop and circular-move prevention.
-- Undo/redo, responsive viewport presets, zoom, preview mode and keyboard shortcuts.
-- Contextual inspector modes and a backend-workspace prototype.
+- Visual element catalogue, selection, inline content editing, and contextual inspector.
+- Element insertion, duplication, deletion, visibility/locking, drag-and-drop, and circular-move prevention.
+- Undo/redo, responsive viewport presets, zoom, preview mode, and keyboard shortcuts.
 - Browser-local draft persistence and workspace panel preferences.
-- Vite production build, GitHub Pages workflow and editor smoke tests.
-
-## Architecture direction
-
-Keep the serialized document independent from the React component tree. Before launching a multi-user product, add a versioned schema and migration strategy, robust document commands and history, remote persistence with authentication and authorization, asset storage, executable logic sandboxing, end-to-end browser tests, and an independent security/accessibility review.
+- Supabase email/password authentication and owner-scoped cloud draft saving.
+- Public published snapshot renderer with anonymous access limited by RLS.
+- Vite production build, GitHub Pages workflow, and editor smoke tests.
