@@ -6,25 +6,29 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("layout controls apply flex and grid styles to the selected element", async ({ page }) => {
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await page.locator(".layer-row").filter({ hasText: "Hero section" }).first().click();
   await page.getByRole("button", { name: "Layout", exact: true }).click();
+  const sectionLayout = page.locator(".site-content .site-section .container-placeholder").first();
   await page.getByLabel("Layout display").selectOption("flex");
   await page.getByLabel("Layout gap").fill("18");
-  await expect(page.locator(".site-content .site-cta")).toHaveCSS("display", "flex");
-  await expect(page.locator(".site-content .site-cta")).toHaveCSS("gap", "18px");
+  await expect(sectionLayout).toHaveCSS("display", "flex");
+  await expect(sectionLayout).toHaveCSS("gap", "18px");
 
   await page.getByLabel("Layout display").selectOption("grid");
   await page.getByLabel("Grid columns").selectOption("3");
-  await expect(page.locator(".site-content .site-cta")).toHaveCSS("display", "grid");
-  await expect(page.locator(".site-content .site-cta")).toHaveCSS("grid-template-columns", /repeat\(3/);
+  await expect(sectionLayout).toHaveCSS("display", "grid");
+  await expect(sectionLayout).toHaveCSS("grid-template-columns", /repeat\(3/);
 });
 
 test("saves and inserts a reusable component with unique element IDs", async ({ page }) => {
   await page.getByRole("button", { name: "Components", exact: true }).click();
   await page.getByLabel("Component name").fill("Primary CTA");
   await page.getByRole("button", { name: "Save selected element and children" }).click();
-  await expect(page.getByText("Primary CTA", { exact: true })).toBeVisible();
+  const savedComponent = page.locator(".component-insert").filter({ hasText: "Primary CTA" });
+  await expect(savedComponent).toBeVisible();
 
-  await page.locator(".component-insert").filter({ hasText: "Primary CTA" }).click();
+  await savedComponent.click();
   await expect(page.locator(".site-content .site-cta")).toHaveCount(2);
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("sytely:components:v1") ?? "[]").length)).toBe(1);
 });
