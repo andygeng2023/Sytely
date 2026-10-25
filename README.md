@@ -60,6 +60,7 @@ The Publish action stores a snapshot in Supabase and renders it at a query-strin
 ## Included editor capabilities
 
 - Visual element catalogue, selection, inline content editing, and contextual inspector.
+- Expanded CSS style inspector for font family, size, weight, line height, letter spacing, text transform, text/background/border colors, padding, margin, sizing, border width, radius, opacity, and shadow; style overrides apply to the selected responsive breakpoint and are included in static HTML export.
 - Element insertion, duplication, deletion, visibility/locking, drag-and-drop, and circular-move prevention.
 - Undo/redo, responsive viewport presets, zoom, preview mode, and keyboard shortcuts.
 - Browser-local draft persistence and workspace panel preferences.

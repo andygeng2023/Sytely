@@ -22,6 +22,23 @@ test("layout controls apply flex and grid styles to the selected element", async
   await expect(sectionLayout).toHaveAttribute("style", /grid-template-columns:\s*repeat\(3/);
 });
 
+test("style inspector applies typography and responsive overrides to the canvas", async ({ page, isMobile }) => {
+  test.skip(isMobile, "The full editor inspector is desktop-oriented; mobile canvas coverage is tested separately.");
+  const heading = page.locator(".site-content h1").first();
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await page.locator(".layer-row").filter({ hasText: "Heading" }).first().click();
+  await page.getByRole("button", { name: "Style", exact: true }).click();
+  await page.getByLabel("Font family").selectOption("Georgia");
+  await page.getByLabel("Text transform").selectOption("uppercase");
+  await expect(heading).toHaveCSS("font-family", /Georgia/);
+  await expect(heading).toHaveCSS("text-transform", "uppercase");
+
+  await page.locator('.viewport-switcher button[aria-label="Tablet viewport"]').click();
+  await page.getByLabel("Font family").selectOption("Arial");
+  await expect(heading).toHaveCSS("font-family", /Arial/);
+  await expect(heading).toHaveAttribute("style", /font-family:\s*Arial/i);
+});
+
 test("saves and inserts a reusable component with unique element IDs", async ({ page, isMobile }) => {
   test.skip(isMobile, "The full editor inspector is desktop-oriented; mobile canvas coverage is tested separately.");
   await page.locator(".site-content .site-cta").first().click();
