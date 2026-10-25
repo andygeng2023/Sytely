@@ -53,11 +53,9 @@ const inspectorItems: { name: InspectorMode; icon: typeof Plus }[] = [
 ];
 const elementGroups: { label: string; icon: typeof Plus; items: { label: string; type: NodeKind; icon: typeof Plus; description: string }[] }[] = [
   { label: "Layout", icon: Grid2X2, items: [{ label: "Section", type: "section", icon: Square, description: "Full-width page section" }, { label: "Container", type: "container", icon: Box, description: "Constrain and group content" }] },
-  { label: "Basic", icon: Type, items: [{ label: "Heading", type: "heading", icon: Heading, description: "A title or heading" }, { label: "Text", type: "paragraph", icon: Type, description: "A paragraph of text" }, { label: "Button", type: "button", icon: MousePointer2, description: "A clickable call to action" }, { label: "Divider", type: "paragraph", icon: AlignJustify, description: "Separate content visually" }] },
+  { label: "Basic", icon: Type, items: [{ label: "Heading", type: "heading", icon: Heading, description: "A title or heading" }, { label: "Text", type: "paragraph", icon: Type, description: "A paragraph of text" }, { label: "Button", type: "button", icon: MousePointer2, description: "A clickable link" }] },
   { label: "Media", icon: Image, items: [{ label: "Image", type: "image", icon: Image, description: "An image with alt text" }] },
   { label: "Interactive", icon: Zap, items: [{ label: "Feature card", type: "feature", icon: Box, description: "A reusable content card" }] },
-  { label: "Forms", icon: FormInput, items: [{ label: "Form field", type: "paragraph", icon: FormInput, description: "A labelled form field placeholder" }] },
-  { label: "Data", icon: Database, items: [{ label: "Data list", type: "feature", icon: List, description: "A collection backed by data" }] },
 ];
 const uid = () => `node-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -150,7 +148,20 @@ export default function App() {
       const target = e.target as HTMLElement | null;
       const typing = !!target && (target.matches("input,textarea,select") || target.isContentEditable || target.closest(".code-editor"));
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); setSavedLabel("All changes saved"); setSaveState("saved"); setToast("Project saved locally"); return; }
+      if (mod && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        try {
+          window.localStorage.setItem("sytely:document:v1", JSON.stringify(nodes));
+          setSavedLabel("Saved on this device");
+          setSaveState("saved");
+          setToast("Project saved locally");
+        } catch {
+          setSavedLabel("Local storage unavailable");
+          setSaveState("unsaved");
+          setToast("Could not save this draft on the device");
+        }
+        return;
+      }
       if (typing) return;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateNode(); }
@@ -448,9 +459,9 @@ export default function App() {
        : node.type === "paragraph" ? <p style={style} aria-label={node.ariaLabel || undefined} contentEditable={!preview && !node.locked} suppressContentEditableWarning onBlur={e => { if (e.currentTarget.textContent !== node.text && !node.locked) commit(nodes.map(n => n.id === node.id ? { ...n, text: e.currentTarget.textContent ?? "" } : n)); }} onClick={e => e.stopPropagation()}>{node.text}</p>
       : node.type === "button" ? <a className="site-cta" style={style} href={preview ? node.href || undefined : undefined} aria-label={node.ariaLabel || undefined} target={node.openInNewTab ? "_blank" : undefined} rel={node.openInNewTab ? "noreferrer" : undefined} onClick={e => { if (!preview) { e.preventDefault(); e.stopPropagation(); if (!node.locked) setSelectedId(node.id); } else if (!node.href) { e.preventDefault(); } }}>{node.text}</a>
       : node.type === "image" ? node.src ? <img className="image-placeholder" style={{ ...style, objectFit: "cover", display: "block" }} src={node.src} alt={node.text} aria-label={node.ariaLabel || undefined} /> : <div className="image-placeholder" style={style}><Image size={24}/><span>{node.text}</span><small>Add an image URL in Properties</small></div>
-      : node.type === "feature" ? <div className="feature-placeholder" style={style}><span className="feature-icon"><Sparkles size={17}/></span><p>{node.text}</p></div>
+      : node.type === "feature" ? <div className="feature-placeholder" style={style} aria-label={node.ariaLabel || undefined}><span className="feature-icon"><Sparkles size={17}/></span><p>{node.text}</p></div>
       : <div className="container-placeholder" style={style} aria-label={node.ariaLabel || undefined}>{(node.type === "section" || node.type === "container") ? (childrenOf(node.id).length ? childrenOf(node.id).map(renderElement) : node.text || <span className="drop-hint">Container · drop elements here</span>) : node.text}</div>;
-    if (node.type === "section") return <section key={node.id} className={`site-section selectable ${isSelected && !preview ? "selected-element" : ""} ${showGuides && !preview ? "guide-visible" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragEnd={() => setDraggingId(null)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</section>;
+    if (node.type === "section") return <section key={node.id} aria-label={node.ariaLabel || undefined} className={`site-section selectable ${isSelected && !preview ? "selected-element" : ""} ${showGuides && !preview ? "guide-visible" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragEnd={() => setDraggingId(null)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</section>;
     return <div key={node.id} className={`selectable node-wrap ${isSelected && !preview ? "selected-element" : ""} ${node.locked && !preview ? "locked-node" : ""}`} draggable={!preview && !node.locked} onDragStart={e => { setDraggingId(node.id); e.dataTransfer.setData("text/sytely-node", node.id); }} onDragEnd={() => setDraggingId(null)} onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, node.id)} onClick={e => { e.stopPropagation(); if (!preview && !node.locked) setSelectedId(node.id); }} onDoubleClick={e => { e.stopPropagation(); if (node.type === "heading" || node.type === "paragraph") (e.currentTarget.querySelector("[contenteditable=true]") as HTMLElement | null)?.focus(); }}>{!preview && isSelected && <span className="selection-tag">{node.name}</span>}{inner}{!preview && node.locked && <Lock className="lock-mark" size={12}/>}</div>;
   };
 
