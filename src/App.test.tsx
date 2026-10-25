@@ -175,4 +175,27 @@ describe("Sytely Studio editor smoke tests", () => {
     expect(host.textContent).toContain("Add an image URL in Properties");
   });
 
+  it("creates and persists multiple pages as one local site", async () => {
+    vi.spyOn(window, "prompt").mockReturnValue("About");
+    await act(async () => { root.render(createElement(App)); });
+    await act(async () => { (host.querySelector('button[aria-label="Layers"]') as HTMLButtonElement).click(); });
+    const addPage = Array.from(host.querySelectorAll("button")).find(button => button.textContent?.includes("New page")) as HTMLButtonElement;
+    expect(addPage).toBeTruthy();
+    await act(async () => { addPage.click(); });
+    expect(host.textContent).toContain("About");
+    await act(async () => { await new Promise(resolve => window.setTimeout(resolve, 550)); });
+    const savedPages = JSON.parse(window.localStorage.getItem("sytely:pages:v1") ?? "[]") as Array<{name:string;nodes:unknown[]}>;
+    expect(savedPages).toHaveLength(2);
+    expect(savedPages.some(page => page.name === "About" && page.nodes.length >= 2)).toBe(true);
+  });
+
+  it("applies breakpoint-specific styles in the canvas preview", async () => {
+    window.localStorage.setItem("sytely:document:v1", JSON.stringify([
+      { id: "responsive-heading", type: "heading", name: "Responsive heading", text: "Resize me", parentId: null, visible: true, locked: false, styles: { fontSize: 30 }, responsive: { mobile: { fontSize: 18 } } },
+    ]));
+    await act(async () => { root.render(createElement(App)); });
+    await act(async () => { (host.querySelector('button[title="Mobile viewport"]') as HTMLButtonElement).click(); });
+    expect(host.querySelector(".site-content h1")?.getAttribute("style")).toContain("font-size: 18px");
+  });
+
 });

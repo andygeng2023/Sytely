@@ -26,7 +26,10 @@ type PageNode = {
   ariaLabel?: string;
   semantic?: string;
   styles: { color?: string; background?: string; fontSize?: number; padding?: number; radius?: number; align?: string; width?: string; height?: string };
+  responsive?: Partial<Record<Breakpoint, { color?: string; background?: string; fontSize?: number; padding?: number; radius?: number; align?: string; width?: string; height?: string }>>;
 };
+type PageSnapshot = { id: string; name: string; nodes: PageNode[] };
+type Breakpoint = "tablet" | "mobile";
 type Workspace = "Add" | "Layers" | "Templates" | "Databases" | "Components" | "Collaboration" | "Add-ons";
 type InspectorMode = "Properties" | "Layout" | "Style" | "Responsive" | "Interactions" | "Backend" | "Accessibility" | "Advanced";
 type BackendTab = "Blocks" | "Code" | "Data" | "Events" | "Console";
@@ -70,6 +73,7 @@ function safeImageSource(value?: string): string | undefined {
   if (!value) return undefined;
   const url = value.trim();
   if (/^https?:\/\//i.test(url) || /^(\/|\.\/|\.\.\/)/.test(url) && !url.startsWith("//")) return url;
+  if (url.length <= 1_500_000 && /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/]+=*$/i.test(url)) return url;
   return undefined;
 }
 
@@ -90,7 +94,7 @@ function isPageNodeArray(value: unknown): value is PageNode[] {
         typeof node.visible !== "boolean" || typeof node.locked !== "boolean" ||
         !styles || typeof styles !== "object" || Array.isArray(styles) ||
         (node.href !== undefined && (typeof node.href !== "string" || node.href.length > 2048)) ||
-        (node.src !== undefined && (typeof node.src !== "string" || node.src.length > 2048)) ||
+        (node.src !== undefined && (typeof node.src !== "string" || node.src.length > 1_500_000)) ||
         (node.ariaLabel !== undefined && (typeof node.ariaLabel !== "string" || node.ariaLabel.length > 300)) ||
         (node.semantic !== undefined && (typeof node.semantic !== "string" || !allowedSemantics.has(node.semantic)))) return false;
     for (const key of ["color", "background"] as const) {
@@ -106,6 +110,28 @@ function isPageNodeArray(value: unknown): value is PageNode[] {
       if (number !== undefined && (typeof number !== "number" || !Number.isFinite(number) || number < 0 || number > max)) return false;
     }
     if (node.openInNewTab !== undefined && typeof node.openInNewTab !== "boolean") return false;
+    if (node.responsive !== undefined) {
+      const responsive = node.responsive as Record<string, unknown> | undefined;
+      if (!responsive || typeof responsive !== "object" || Array.isArray(responsive) ||
+          Object.keys(responsive).some(key => key !== "tablet" && key !== "mobile")) return false;
+      for (const breakpoint of ["tablet", "mobile"] as const) {
+        const override = responsive[breakpoint] as Record<string, unknown> | undefined;
+        if (override === undefined) continue;
+        if (!override || typeof override !== "object" || Array.isArray(override)) return false;
+        for (const key of ["color", "background"]) {
+          const color = override[key];
+          if (color !== undefined && (typeof color !== "string" || !/^#[0-9a-f]{3,8}$/i.test(color))) return false;
+        }
+        if (override.align !== undefined && !["left", "center", "right"].includes(String(override.align))) return false;
+        if (override.width !== undefined && !["Auto", "100%", "Fit content", "320px"].includes(String(override.width))) return false;
+        if (override.height !== undefined && !["Auto", "100%", "320px", "480px"].includes(String(override.height))) return false;
+        for (const key of ["fontSize", "padding", "radius"]) {
+          const number = override[key];
+          const max = key === "fontSize" ? 128 : key === "padding" ? 200 : 100;
+          if (number !== undefined && (typeof number !== "number" || !Number.isFinite(number) || number < 0 || number > max)) return false;
+        }
+      }
+    }
     ids.add(node.id);
   }
   for (const candidate of value as PageNode[]) {
@@ -123,9 +149,107 @@ function isPageNodeArray(value: unknown): value is PageNode[] {
   return true;
 }
 
+function isPageSnapshotArray(value: unknown): value is PageSnapshot[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 50) return false;
+  const ids = new Set<string>();
+  return value.every((item) => {
+    if (!item || typeof item !== "object") return false;
+    const page = item as Partial<PageSnapshot>;
+    if (typeof page.id !== "string" || !page.id || page.id.length > 120 || ids.has(page.id) ||
+        typeof page.name !== "string" || !page.name.trim() || page.name.length > 80 ||
+        !isPageNodeArray(page.nodes)) return false;
+    ids.add(page.id);
+    return true;
+  });
+}
+
+function loadSavedPages(): PageSnapshot[] | null {
+  try {
+    const raw = window.localStorage.getItem("sytely:pages:v1");
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isPageSnapshotArray(parsed) ? parsed : null;
+  } catch { return null; }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function staticStyle(styles: PageNode["styles"] = {}): string {
+  const declarations: string[] = [];
+  if (typeof styles.color === "string" && /^#[0-9a-f]{3,8}$/i.test(styles.color)) declarations.push(`color:${styles.color}`);
+  if (typeof styles.background === "string" && /^#[0-9a-f]{3,8}$/i.test(styles.background)) declarations.push(`background:${styles.background}`);
+  if (typeof styles.fontSize === "number" && Number.isFinite(styles.fontSize) && styles.fontSize >= 0 && styles.fontSize <= 128) declarations.push(`font-size:${styles.fontSize}px`);
+  if (typeof styles.padding === "number" && Number.isFinite(styles.padding) && styles.padding >= 0 && styles.padding <= 200) declarations.push(`padding:${styles.padding}px`);
+  if (typeof styles.radius === "number" && Number.isFinite(styles.radius) && styles.radius >= 0 && styles.radius <= 100) declarations.push(`border-radius:${styles.radius}px`);
+  if (styles.align === "left" || styles.align === "center" || styles.align === "right") declarations.push(`text-align:${styles.align}`);
+  if (typeof styles.width === "string" && ["100%", "Fit content", "320px"].includes(styles.width)) declarations.push(`width:${styles.width === "Fit content" ? "fit-content" : styles.width}`);
+  if (typeof styles.height === "string" && ["100%", "320px", "480px"].includes(styles.height)) declarations.push(`height:${styles.height}`);
+  return declarations.join(";");
+}
+
+function buildStaticHtml(pages: PageSnapshot[], siteName: string): string {
+  const cssRules: string[] = [];
+  const renderNode = (node: PageNode, all: PageNode[]): string => {
+    if (!node.visible) return "";
+    const className = `node-${node.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+    const style = staticStyle(node.styles);
+    const attrs = `class="${className}"${style ? ` style="${style}"` : ""}${node.ariaLabel ? ` aria-label="${escapeHtml(node.ariaLabel)}"` : ""}`;
+    const nested = all.filter(child => child.parentId === node.id).map(child => renderNode(child, all)).join("");
+    for (const breakpoint of ["tablet", "mobile"] as const) {
+      const overrideStyle = staticStyle(node.responsive?.[breakpoint]);
+      if (overrideStyle) cssRules.push(`@${breakpoint === "tablet" ? "media (max-width: 900px)" : "media (max-width: 600px)"}{.${className}{${overrideStyle}}}`);
+    }
+    const text = escapeHtml(node.text);
+    if (node.type === "heading") {
+      const tag = node.semantic === "h2" || node.semantic === "h3" ? node.semantic : "h1";
+      return `<${tag} ${attrs}>${text}</${tag}>`;
+    }
+    if (node.type === "paragraph") return `<p ${attrs}>${text}</p>`;
+    if (node.type === "button") {
+      const href = safeLink(node.href) ?? "#";
+      return `<a ${attrs} href="${escapeHtml(href)}"${node.openInNewTab ? ' target="_blank" rel="noopener noreferrer"' : ""}>${text}</a>`;
+    }
+    if (node.type === "image") {
+      const src = safeImageSource(node.src);
+      return src ? `<img ${attrs} src="${escapeHtml(src)}" alt="${text}" loading="lazy">` : `<div ${attrs} role="img" aria-label="${escapeHtml(node.text || "Image placeholder")}">${text || "Image placeholder"}</div>`;
+    }
+    if (node.type === "feature") return `<article ${attrs}><p>${text}</p>${nested}</article>`;
+    return `<section ${attrs}>${node.text && node.type !== "section" && node.type !== "container" ? `<p>${text}</p>` : ""}${nested}</section>`;
+  };
+  const pageMarkup = pages.map((page, index) => {
+    const pageId = `page-${page.id.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+    const content = page.nodes.filter(node => node.parentId === null).map(node => renderNode(node, page.nodes)).join("");
+    return `<section class="export-page" id="${pageId}" ${index ? "hidden" : ""} aria-label="${escapeHtml(page.name)}">${content || "<p>Start creating this page in Sytely.</p>"}</section>`;
+  }).join("");
+  const nav = pages.map((page, index) => `<a href="#page-${page.id.replace(/[^a-zA-Z0-9_-]/g, "")}" data-page="${page.id.replace(/[^a-zA-Z0-9_-]/g, "")}" ${index === 0 ? 'aria-current="page"' : ""}>${escapeHtml(page.name)}</a>`).join("");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="${escapeHtml(siteName)}"><title>${escapeHtml(siteName)}</title><style>*{box-sizing:border-box}body{margin:0;font:16px/1.6 Inter,system-ui,sans-serif;color:#202033}header{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:18px clamp(18px,5vw,72px);border-bottom:1px solid #e8e8ef}header strong{font-size:18px}nav{display:flex;flex-wrap:wrap;gap:16px}nav a{color:inherit;text-decoration:none}nav a[aria-current="page"]{font-weight:700;color:#6258d9}main{max-width:1200px;margin:auto;padding:0 clamp(16px,4vw,48px)}.export-page{min-height:70vh;padding:32px 0}.export-page[hidden]{display:none!important}h1,h2,h3,p{max-width:100%;overflow-wrap:anywhere}a[class^="node-"]{display:inline-block;text-decoration:none;border-radius:8px}img{max-width:100%;height:auto}section,article{max-width:100%}footer{padding:24px;text-align:center;color:#777;border-top:1px solid #eee}${cssRules.join("")}</style></head><body><header><strong>${escapeHtml(siteName)}</strong><nav aria-label="Pages">${nav}</nav></header><main>${pageMarkup}</main><footer>Made with Sytely</footer><script>(()=>{const pages=[...document.querySelectorAll('.export-page')];const links=[...document.querySelectorAll('nav a[data-page]')];function show(id){const key=(id||'').replace(/^#page-/,'');let found=false;for(const page of pages){const active=page.id==='page-'+key || (!key && page===pages[0]);page.hidden=!active;if(active)found=true;}if(!found&&pages[0])pages.forEach((page,index)=>page.hidden=index!==0);for(const link of links){if(link.dataset.page===key)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current');}}links.forEach(link=>link.addEventListener('click',()=>show('#page-'+link.dataset.page)));window.addEventListener('hashchange',()=>show(location.hash));show(location.hash);})();</script></body></html>`;
+}
+
 export default function App() {
-  const [nodes, setNodes] = useState<PageNode[]>(() => {
+  const [pages, setPages] = useState<PageSnapshot[]>(() => {
+    const saved = loadSavedPages();
+    if (saved) return saved;
     try {
+      const raw = window.localStorage.getItem("sytely:document:v1");
+      const parsed: unknown = raw ? JSON.parse(raw) : null;
+      return [{ id: "page-home", name: "Home", nodes: isPageNodeArray(parsed) ? parsed : initialNodes }];
+    } catch { return [{ id: "page-home", name: "Home", nodes: initialNodes }]; }
+  });
+  const [activePageId, setActivePageId] = useState(() => {
+    const saved = loadSavedPages();
+    try {
+      const stored = window.localStorage.getItem("sytely:active-page:v1");
+      return saved?.some(page => page.id === stored) ? stored! : saved?.[0]?.id ?? "page-home";
+    } catch { return saved?.[0]?.id ?? "page-home"; }
+  });
+  const [nodes, setNodes] = useState<PageNode[]>(() => {
+    const saved = loadSavedPages();
+    try {
+      const stored = window.localStorage.getItem("sytely:active-page:v1");
+      const active = saved?.find(page => page.id === stored) ?? saved?.[0];
+      if (active) return active.nodes;
       const raw = window.localStorage.getItem("sytely:document:v1");
       if (!raw) return initialNodes;
       const parsed: unknown = JSON.parse(raw);
@@ -134,11 +258,16 @@ export default function App() {
     } catch { return initialNodes; }
   });
   const [selectedId, setSelectedId] = useState(() => {
+    const saved = loadSavedPages();
     try {
+      const stored = window.localStorage.getItem("sytely:active-page:v1");
+      const activeNodes = saved?.find(page => page.id === stored)?.nodes ?? saved?.[0]?.nodes;
+      if (activeNodes?.some(node => node.id === "hero-button")) return "hero-button";
+      if (activeNodes?.[0]?.id) return activeNodes[0].id;
       const raw = window.localStorage.getItem("sytely:document:v1");
       if (raw) {
         const parsed: unknown = JSON.parse(raw);
-        if (isPageNodeArray(parsed) && parsed.some((node) => node.id === "hero-button")) return "hero-button";
+        if (isPageNodeArray(parsed) && parsed.some(node => node.id === "hero-button")) return "hero-button";
         if (isPageNodeArray(parsed) && parsed[0]?.id) return parsed[0].id;
       }
     } catch { /* recover with the starter document */ }
@@ -168,12 +297,13 @@ export default function App() {
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [toast, setToast] = useState("");
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [pageName, setPageName] = useState("Home");
+  const [pageName, setPageName] = useState(() => pages.find(page => page.id === activePageId)?.name ?? "Home");
   const [projectName, setProjectName] = useState(() => {
     try { return window.localStorage.getItem("sytely:project-name:v1") || "My Website"; } catch { return "My Website"; }
   });
   const canvasRef = useRef<HTMLDivElement>(null);
   const selected = nodes.find(n => n.id === selectedId);
+  const activePage = pages.find(page => page.id === activePageId) ?? pages[0];
   const childrenOf = useCallback((parentId: string | null) => nodes.filter(n => n.parentId === parentId), [nodes]);
   const childNodes = useMemo(() => nodes.filter(n => n.parentId === selectedId), [nodes, selectedId]);
 
@@ -186,6 +316,8 @@ export default function App() {
         e.preventDefault();
         try {
           window.localStorage.setItem("sytely:document:v1", JSON.stringify(nodes));
+          window.localStorage.setItem("sytely:pages:v1", JSON.stringify(pages.map(page => page.id === activePageId ? { ...page, name: pageName, nodes } : page)));
+          window.localStorage.setItem("sytely:active-page:v1", activePageId);
           setSavedLabel("Saved on this device");
           setSaveState("saved");
           setToast("Project saved locally");
@@ -214,9 +346,26 @@ export default function App() {
     return () => window.clearTimeout(t);
   }, [toast]);
   useEffect(() => {
+    setPages(current => {
+      const page = current.find(item => item.id === activePageId);
+      if (!page || JSON.stringify(page.nodes) === JSON.stringify(nodes)) return current;
+      return current.map(item => item.id === activePageId ? { ...item, nodes } : item);
+    });
+  }, [nodes, activePageId]);
+  useEffect(() => {
+    setPages(current => {
+      const page = current.find(item => item.id === activePageId);
+      if (!page || page.name === pageName) return current;
+      return current.map(item => item.id === activePageId ? { ...item, name: pageName } : item);
+    });
+  }, [pageName, activePageId]);
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       try {
         window.localStorage.setItem("sytely:document:v1", JSON.stringify(nodes));
+        const persistedPages = pages.map(page => page.id === activePageId ? { ...page, name: pageName, nodes } : page);
+        window.localStorage.setItem("sytely:pages:v1", JSON.stringify(persistedPages));
+        window.localStorage.setItem("sytely:active-page:v1", activePageId);
         setSaveState("saved");
         setSavedLabel("Saved on this device");
       } catch {
@@ -225,7 +374,7 @@ export default function App() {
       }
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [nodes]);
+  }, [nodes, pages, activePageId, pageName]);
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem("sytely:workspace:v1");
@@ -251,6 +400,7 @@ export default function App() {
     lastCommitAt.current = now;
     setFuture([]);
     setNodes(next);
+    setPages(current => current.map(page => page.id === activePageId ? { ...page, nodes: next } : page));
     setSaveState("unsaved");
     setSavedLabel("Unsaved changes");
   };
@@ -262,6 +412,94 @@ export default function App() {
     lastCommitAt.current = 0;
     setFuture(f => { if (!f.length) return f; const next = f[0]; setHistory(h => [...h, nodes]); setNodes(next); setSaveState("unsaved"); setSavedLabel("Unsaved changes"); return f.slice(1); });
   }
+  function switchPage(pageId: string) {
+    const page = pages.find(item => item.id === pageId);
+    if (!page) return;
+    setHistory([]);
+    setFuture([]);
+    setActivePageId(page.id);
+    setNodes(page.nodes);
+    setPageName(page.name);
+    setSelectedId(page.nodes.find(node => node.id === "hero-button")?.id ?? page.nodes[0]?.id ?? "");
+    setWorkspace("Layers");
+    setToast(`Opened page: ${page.name}`);
+  }
+  function addPage() {
+    const name = window.prompt("New page name", `Page ${pages.length + 1}`);
+    if (!name?.trim()) return;
+    const pageId = `page-${uid()}`;
+    const sectionId = uid();
+    const titleId = uid();
+    const newNodes: PageNode[] = [
+      { id: sectionId, type: "section", name: "Page section", text: "", parentId: null, visible: true, locked: false, styles: { background: "#ffffff", padding: 48, align: "center" } },
+      { id: titleId, type: "heading", name: "Page heading", text: name.trim(), parentId: sectionId, visible: true, locked: false, styles: { color: "#202033", fontSize: 36, align: "center" } },
+      { id: uid(), type: "paragraph", name: "Page introduction", text: "Add your content here.", parentId: sectionId, visible: true, locked: false, styles: { color: "#6f7184", fontSize: 16, align: "center" } },
+    ];
+    const page = { id: pageId, name: name.trim().slice(0, 80), nodes: newNodes };
+    setPages(current => [...current, page]);
+    setHistory([]);
+    setFuture([]);
+    setActivePageId(pageId);
+    setNodes(newNodes);
+    setPageName(page.name);
+    setSelectedId(titleId);
+    setWorkspace("Add");
+    setInspector("Properties");
+    setToast(`Created page: ${page.name}`);
+  }
+  function renameActivePage() {
+    const name = window.prompt("Page name", pageName);
+    if (!name?.trim()) return;
+    setPageName(name.trim().slice(0, 80));
+    setToast("Page renamed");
+  }
+  function deleteActivePage() {
+    if (pages.length <= 1) { setToast("A website must have at least one page"); return; }
+    if (!window.confirm(`Delete the page “${pageName}”? This cannot be undone.`)) return;
+    const remaining = pages.filter(page => page.id !== activePageId);
+    setPages(remaining);
+    switchPage(remaining[0].id);
+    setToast("Page deleted");
+  }
+  function handleImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || selected?.type !== "image") return;
+    if (!["image/png", "image/jpeg", "image/webp", "image/gif"].includes(file.type)) {
+      setToast("Choose a PNG, JPEG, WebP or GIF image");
+      return;
+    }
+    if (file.size > 1_000_000) {
+      setToast("Images must be 1 MB or smaller for local project storage");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string" || !reader.result.startsWith("data:image/")) {
+        setToast("Could not read that image");
+        return;
+      }
+      updateSelected({ src: reader.result });
+      setToast("Image added to your project");
+    };
+    reader.onerror = () => setToast("Could not read that image");
+    reader.readAsDataURL(file);
+  }
+  function exportSiteHtml() {
+    const exportPages = pages.map(page => page.id === activePageId ? { ...page, name: pageName, nodes } : page);
+    const html = buildStaticHtml(exportPages, projectName);
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${projectName.trim().replace(/[^a-z0-9-_]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "sytely-site"}.html`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setToast("Standalone website exported with all pages and responsive styles.");
+  }
+
   function addNode(type: NodeKind, name?: string, parentOverride?: string | null) {
     const defaults: Record<NodeKind, { text: string; styles: PageNode["styles"] }> = {
       heading: { text: "Your heading", styles: { fontSize: 30, color: "#202033", align: "center" } },
@@ -330,7 +568,20 @@ export default function App() {
 
   function updateSelected(patch: Partial<PageNode> | { styles: Partial<PageNode["styles"]> }) {
     if (!selected || selected.locked) return;
-    commit(nodes.map(n => n.id === selected.id ? { ...n, ...patch, styles: "styles" in patch ? { ...n.styles, ...patch.styles } : n.styles } : n));
+    commit(nodes.map(n => n.id === selected.id ? {
+      ...n, ...patch,
+      styles: "styles" in patch ? { ...n.styles, ...patch.styles } : n.styles,
+      responsive: "responsive" in patch ? { ...n.responsive, ...patch.responsive } : n.responsive,
+    } : n));
+  }
+  function updateResponsive(patch: Partial<PageNode["styles"]>) {
+    if (!selected || selected.locked) return;
+    if (viewport === "desktop") { updateSelected({ styles: patch }); return; }
+    const breakpoint = viewport as Breakpoint;
+    updateSelected({ responsive: {
+      ...selected.responsive,
+      [breakpoint]: { ...selected.responsive?.[breakpoint], ...patch },
+    } });
   }
   function removeNode(id: string) {
     const ids = new Set<string>([id]);
@@ -481,12 +732,13 @@ export default function App() {
     if (!node.visible && preview) return null;
     if (!node.visible && !preview) return <div className="hidden-node" key={node.id} onClick={() => setSelectedId(node.id)}><Eye size={12}/> {node.name} <span>Hidden in editor</span></div>;
     const isSelected = selectedId === node.id;
+    const appliedStyles = { ...node.styles, ...(viewport === "desktop" ? {} : node.responsive?.[viewport]) };
     const style: React.CSSProperties = {
-      color: node.styles.color, backgroundColor: node.type === "button" ? node.styles.background : node.type === "section" || node.type === "container" || node.type === "feature" || node.type === "image" ? node.styles.background : undefined,
-      fontSize: node.styles.fontSize, padding: node.type === "button" ? `${node.styles.padding ?? 12}px 22px` : node.styles.padding,
-      width: node.styles.width && node.styles.width !== "Auto" ? node.styles.width === "Fit content" ? "fit-content" : node.styles.width : undefined,
-      height: node.styles.height && node.styles.height !== "Auto" ? node.styles.height : undefined,
-      borderRadius: node.styles.radius, textAlign: (node.styles.align as React.CSSProperties["textAlign"]) ?? "center",
+      color: appliedStyles.color, backgroundColor: node.type === "button" ? appliedStyles.background : node.type === "section" || node.type === "container" || node.type === "feature" || node.type === "image" ? appliedStyles.background : undefined,
+      fontSize: appliedStyles.fontSize, padding: node.type === "button" ? `${appliedStyles.padding ?? 12}px 22px` : appliedStyles.padding,
+      width: appliedStyles.width && appliedStyles.width !== "Auto" ? appliedStyles.width === "Fit content" ? "fit-content" : appliedStyles.width : undefined,
+      height: appliedStyles.height && appliedStyles.height !== "Auto" ? appliedStyles.height : undefined,
+      borderRadius: appliedStyles.radius, textAlign: (appliedStyles.align as React.CSSProperties["textAlign"]) ?? "center",
     };
     const HeadingTag = node.semantic === "h2" ? "h2" : node.semantic === "h3" ? "h3" : "h1";
     const inner = node.type === "heading" ? <HeadingTag style={style} aria-label={node.ariaLabel || undefined} contentEditable={!preview && !node.locked} suppressContentEditableWarning onBlur={e => { if (e.currentTarget.textContent !== node.text && !node.locked) commit(nodes.map(n => n.id === node.id ? { ...n, text: e.currentTarget.textContent ?? "" } : n)); }} onClick={e => e.stopPropagation()}>{node.text}</HeadingTag>
@@ -512,7 +764,7 @@ export default function App() {
       </div>
     );
     if (workspace === "Add") return <><div className="panel-heading"><div><h2>Add elements</h2><p>Build your page, one element at a time.</p></div><button className="icon-button" title="Close panel" onClick={() => setLeftCollapsed(true)}><X size={15}/></button></div><div className="search-box"><Search size={15}/><input className="element-search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search elements…"/><kbd>⌘ K</kbd></div><div className="category-pills"><button className="category-pill active">All</button><button className="category-pill" onClick={() => setSearch("layout")}>Layout</button><button className="category-pill" onClick={() => setSearch("text")}>Text</button><button className="category-pill" onClick={() => setSearch("media")}>Media</button></div><div className="workspace-scroll">{elementGroups.map(group => { const filtered = group.items.filter(item => `${item.label} ${group.label} ${item.description}`.toLowerCase().includes(search.toLowerCase())); if (!filtered.length) return null; const GroupIcon = group.icon; return <div className="element-group" key={group.label}><button className="group-heading" onClick={() => setOpenGroups(g => g.includes(group.label) ? g.filter(x => x !== group.label) : [...g, group.label])}><ChevronDown size={14} className={openGroups.includes(group.label) ? "" : "rotated"}/><GroupIcon size={14}/><span>{group.label}</span><small>{filtered.length}</small></button>{openGroups.includes(group.label) && <div className="element-grid">{filtered.map(item => { const Icon = item.icon; return <button key={item.label} className="element-tile" draggable onDragStart={e => { e.dataTransfer.setData("text/sytely-type", item.type); setDraggingId(item.type); }} onClick={() => addNode(item.type, item.label)} title={item.description}><span className="element-icon"><Icon size={18}/></span><span>{item.label}</span><Plus size={12} className="tile-add"/></button>; })}</div>}</div>; })}{search && !elementGroups.some(g => g.items.some(i => `${i.label} ${g.label} ${i.description}`.toLowerCase().includes(search.toLowerCase()))) && <p className="empty-message">No elements match “{search}”. Try another term.</p>}</div><div className="panel-footnote"><Sparkles size={14}/><span>Tip: select a container, then add an element inside it.</span></div></>;
-    if (workspace === "Layers") return <><div className="panel-heading"><div><h2>Layers & pages</h2><p>Page structure and visibility</p></div><button className="icon-button" title="Add section" onClick={() => addNode("section")}><Plus size={16}/></button></div><div className="page-row"><FileText size={15}/><span>{pageName}</span><span className="page-tag">Page</span><ChevronDown size={13}/></div><div className="layer-toolbar"><span>ELEMENT TREE</span></div><div className="layer-list">{nodes.filter(n => n.parentId === null).map(n => renderLayerNode(n))}</div></>;
+    if (workspace === "Layers") return <><div className="panel-heading"><div><h2>Layers & pages</h2><p>Page structure and visibility</p></div><button className="icon-button" title="Add section" onClick={() => addNode("section")}><Plus size={16}/></button></div><div className="page-list">{pages.map(page => <div className={`page-list-row ${page.id === activePageId ? "active" : ""}`} key={page.id}><button className="page-list-open" onClick={() => switchPage(page.id)} title={`Open ${page.name}`}><FileText size={14}/><span>{page.name}</span><small>{page.nodes.length}</small></button>{page.id === activePageId && <button className="page-list-menu" title="Rename page" onClick={renameActivePage}><MoreHorizontal size={15}/></button>}</div>)}</div><div className="page-actions"><button onClick={addPage}><Plus size={13}/> New page</button><button onClick={renameActivePage}><FileText size={13}/> Rename</button><button onClick={deleteActivePage} disabled={pages.length <= 1}><Trash2 size={13}/> Delete</button></div><div className="layer-toolbar"><span>ELEMENT TREE</span></div><div className="layer-list">{nodes.filter(n => n.parentId === null).map(n => renderLayerNode(n))}</div></>;
     const content: Record<Exclude<Workspace, "Add" | "Layers">, { icon: typeof Plus; title: string; description: string; cards: string[] }> = {
       Templates: { icon: LayoutTemplate, title: "Start with a template", description: "A strong starting point for your next idea.", cards: ["Portfolio starter", "SaaS landing page", "Studio homepage", "Product launch"] },
       Databases: { icon: Database, title: "Your data sources", description: "Connect structured data to your designs.", cards: ["Sample products", "Team members", "Blog posts", "Add a data source"] },
@@ -527,10 +779,10 @@ export default function App() {
   const renderInspector = () => {
     if (inspector === "Backend") return <div className="backend-content"><div className="backend-header"><div><span className="eyebrow-label">DEVELOPMENT WORKSPACE</span><h2>Backend logic</h2></div><div className="backend-size-actions"><button title="Inspector width" className={backendSize === "inspector" ? "active" : ""} onClick={() => setBackendSize("inspector")}><PanelRightClose size={14}/></button><button title="Expanded workspace" className={backendSize === "expanded" ? "active" : ""} onClick={() => setBackendSize("expanded")}><Columns2 size={14}/></button><button title="Focus mode" className={backendSize === "focus" ? "active" : ""} onClick={() => setBackendSize("focus")}><MaximizeIcon/></button></div></div><div className="backend-tabs">{(["Blocks", "Code", "Data", "Events", "Console"] as BackendTab[]).map(t => <button key={t} className={backendTab === t ? "active" : ""} onClick={() => setBackendTab(t)}>{t}</button>)}</div>{backendTab === "Blocks" ? <><div className="event-card"><div className="event-card-top"><span className="event-dot"><MousePointer2 size={13}/></span><span>EVENT TRIGGER</span><MoreHorizontal size={15}/></div><strong>When {selected?.type === "button" ? "button" : selected?.name.toLowerCase()} is clicked</strong><small>Element: {selected?.name ?? "None selected"}</small></div><div className="block-connector"/><div className="logic-block purple-block"><div className="block-top"><Zap size={13}/><span>VARIABLES</span></div><strong>Set variable</strong><div className="block-field"><span>name</span><code>message</code></div><div className="block-field"><span>value</span><code>"Welcome to Sytely"</code></div></div><div className="block-connector"/><div className="logic-block blue-block"><div className="block-top"><Type size={13}/><span>ELEMENT ACTION</span></div><strong>Set text content</strong><div className="block-field"><span>target</span><code>resultLabel</code></div><div className="block-field"><span>value</span><code>message</code></div></div><button className="add-block-button" onClick={() => setToast("Choose a block from the block library")}><Plus size={14}/> Add action block</button><div className="generated-preview"><div className="section-title">GENERATED LOGIC PREVIEW <span className="read-only-tag">READ ONLY</span></div><pre>{`async function onClick(event) {\n  const message = "Welcome to Sytely";\n  resultLabel.textContent = message;\n}`}</pre></div></> : backendTab === "Code" ? <><div className="code-toolbar"><span><Code2 size={13}/> Custom JavaScript</span><span className="read-only-tag">DRAFT</span></div><textarea className="code-editor" spellCheck={false} value={code} onChange={e => setCode(e.target.value)} aria-label="Custom JavaScript code"/><div className="code-actions"><button className="subtle-button" onClick={() => setCode("onClick(button)\n  setVariable(\"message\", \"Welcome to Sytely\")\n  setText(resultLabel, message)")}><Undo2 size={13}/> Reset</button><button className="primary-small" onClick={() => setToast("Code draft saved locally")}>Save code</button></div><p className="muted-note">Custom code is stored separately from generated visual logic.</p></> : backendTab === "Data" ? <><div className="section-title">DATA SOURCES</div>{["Products · 8 fields", "Team members · 5 fields", "Blog posts · 6 fields"].map((t, i) => <button className="resource-row" key={t} onClick={() => setToast("Sample data source selected")}><Database size={15}/><span>{t}<small>{i === 0 ? "Sample collection" : "Not connected"}</small></span><ChevronRight size={14}/></button>)}<button className="add-block-button" onClick={() => setToast("Connect a data provider to continue")}><Plus size={14}/> Add data source</button></> : backendTab === "Events" ? <><div className="section-title">EVENT HANDLERS</div><div className="event-card"><div className="event-card-top"><CircleDot size={13}/><span>CLICK EVENT</span></div><strong>When {selected?.name ?? "element"} is clicked</strong><small>2 actions · Enabled</small></div><button className="add-block-button" onClick={() => setToast("Event handler draft created")}><Plus size={14}/> Add event handler</button></> : <><div className="diagnostic-summary"><Check size={16}/><div><strong>Editor validation passed</strong><small>0 errors · 1 informational message</small></div></div><div className="console-entry"><span>07:41:02</span><code>Editor ready. No runtime execution yet.</code></div><div className="console-entry"><span>07:41:02</span><code>Visual blocks are in draft mode.</code></div><button className="subtle-button" onClick={() => setConsoleOpen(!consoleOpen)}>{consoleOpen ? "Hide details" : "Show validation details"}</button>{consoleOpen && <p className="muted-note">No event code has been executed. Publishing and live backend execution are not configured.</p>}</>}</div>;
     const common = <div className="inspector-section"><div className="section-title">SELECTED ELEMENT <span className="type-chip">{selected?.type ?? "page"}</span></div><div className="selected-object"><span className="selected-object-icon">{selected?.type === "button" ? <MousePointer2 size={16}/> : selected?.type === "heading" ? <Heading size={16}/> : selected?.type === "image" ? <Image size={16}/> : <Box size={16}/>}</span><div><strong>{selected?.name ?? "Page"}</strong><small>{selected?.id ?? "root"}</small></div><button title="Duplicate element" onClick={duplicateNode}><Copy size={14}/></button><button title="Delete element" onClick={() => selected && removeNode(selected.id)}><Trash2 size={14}/></button></div></div>;
-    if (inspector === "Properties") return <><div className="panel-heading inspector-title"><div><h2>Properties</h2><p>Configure the selected element.</p></div><button className="icon-button" onClick={() => setRightCollapsed(true)}><X size={15}/></button></div>{common}<div className="inspector-section"><div className="section-title">CONTENT</div><label className="field-label">Element name<input value={selected?.name ?? ""} onChange={e => updateSelected({ name: e.target.value })}/></label>{selected?.type !== "section" && selected?.type !== "container" && <label className="field-label">Text content<textarea rows={3} value={selected?.text ?? ""} onChange={e => updateSelected({ text: e.target.value })}/></label>}{selected?.type === "button" && <><label className="field-label">Link URL<input type="url" placeholder="https://example.com" value={selected?.href ?? ""} onChange={e => updateSelected({ href: e.target.value })}/></label><label className="check-row"><input type="checkbox" checked={selected?.openInNewTab ?? false} onChange={e => updateSelected({ openInNewTab: e.target.checked })}/> Open in new tab</label></>}</div><div className="inspector-section"><div className="section-title">LAYOUT</div><div className="two-fields"><label className="field-label">Width<select value={selected?.styles.width ?? "Auto"} onChange={e => updateSelected({ styles: { width: e.target.value } })}><option>Auto</option><option>100%</option><option>Fit content</option><option>320px</option></select></label><label className="field-label">Alignment<select value={selected?.styles.align ?? "center"} onChange={e => updateSelected({ styles: { align: e.target.value } })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div><label className="field-label">Padding <span className="inline-value">{selected?.styles.padding ?? 0}px</span><input type="range" min="0" max="80" step="4" value={selected?.styles.padding ?? 0} onChange={e => updateSelected({ styles: { padding: Number(e.target.value) } })}/></label></div><div className="inspector-section"><div className="section-title">APPEARANCE</div><label className="field-label">Text color<div className="color-field"><input type="color" value={selected?.styles.color ?? "#202033"} onChange={e => updateSelected({ styles: { color: e.target.value } })}/><code>{selected?.styles.color ?? "Default"}</code><button onClick={() => updateSelected({ styles: { color: undefined } })}>Reset</button></div></label><label className="field-label">Background<div className="color-field"><input type="color" value={selected?.styles.background ?? "#ffffff"} onChange={e => updateSelected({ styles: { background: e.target.value } })}/><code>{selected?.styles.background ?? "Transparent"}</code><button onClick={() => updateSelected({ styles: { background: undefined } })}>Reset</button></div></label><label className="field-label">Corner radius <span className="inline-value">{selected?.styles.radius ?? 0}px</span><input type="range" min="0" max="28" step="2" value={selected?.styles.radius ?? 0} onChange={e => updateSelected({ styles: { radius: Number(e.target.value) } })}/></label></div><div className="inspector-bottom-note"><Check size={14}/> Changes update the canvas immediately</div></>;
+    if (inspector === "Properties") return <><div className="panel-heading inspector-title"><div><h2>Properties</h2><p>Configure the selected element.</p></div><button className="icon-button" onClick={() => setRightCollapsed(true)}><X size={15}/></button></div>{common}<div className="inspector-section"><div className="section-title">CONTENT</div><label className="field-label">Element name<input value={selected?.name ?? ""} onChange={e => updateSelected({ name: e.target.value })}/></label>{selected?.type !== "section" && selected?.type !== "container" && <label className="field-label">Text content<textarea rows={3} value={selected?.text ?? ""} onChange={e => updateSelected({ text: e.target.value })}/></label>}{selected?.type === "button" && <><label className="field-label">Link URL<input type="url" placeholder="https://example.com" value={selected?.href ?? ""} onChange={e => updateSelected({ href: e.target.value })}/></label><label className="check-row"><input type="checkbox" checked={selected?.openInNewTab ?? false} onChange={e => updateSelected({ openInNewTab: e.target.checked })}/> Open in new tab</label></>}{selected?.type === "image" && <><label className="field-label">Image URL<input type="text" placeholder="https://example.com/image.jpg" value={selected?.src ?? ""} onChange={e => updateSelected({ src: e.target.value })}/></label><label className="field-label">Upload image<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleImageUpload}/></label><p className="muted-note">PNG, JPEG, WebP or GIF · up to 1 MB. Embedded images travel with the exported site.</p></>}</div><div className="inspector-section"><div className="section-title">LAYOUT</div><div className="two-fields"><label className="field-label">Width<select value={selected?.styles.width ?? "Auto"} onChange={e => updateSelected({ styles: { width: e.target.value } })}><option>Auto</option><option>100%</option><option>Fit content</option><option>320px</option></select></label><label className="field-label">Alignment<select value={selected?.styles.align ?? "center"} onChange={e => updateSelected({ styles: { align: e.target.value } })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label></div><label className="field-label">Padding <span className="inline-value">{selected?.styles.padding ?? 0}px</span><input type="range" min="0" max="80" step="4" value={selected?.styles.padding ?? 0} onChange={e => updateSelected({ styles: { padding: Number(e.target.value) } })}/></label></div><div className="inspector-section"><div className="section-title">APPEARANCE</div><label className="field-label">Text color<div className="color-field"><input type="color" value={selected?.styles.color ?? "#202033"} onChange={e => updateSelected({ styles: { color: e.target.value } })}/><code>{selected?.styles.color ?? "Default"}</code><button onClick={() => updateSelected({ styles: { color: undefined } })}>Reset</button></div></label><label className="field-label">Background<div className="color-field"><input type="color" value={selected?.styles.background ?? "#ffffff"} onChange={e => updateSelected({ styles: { background: e.target.value } })}/><code>{selected?.styles.background ?? "Transparent"}</code><button onClick={() => updateSelected({ styles: { background: undefined } })}>Reset</button></div></label><label className="field-label">Corner radius <span className="inline-value">{selected?.styles.radius ?? 0}px</span><input type="range" min="0" max="28" step="2" value={selected?.styles.radius ?? 0} onChange={e => updateSelected({ styles: { radius: Number(e.target.value) } })}/></label></div><div className="inspector-bottom-note"><Check size={14}/> Changes update the canvas immediately</div></>;
     if (inspector === "Layout") return <><div className="panel-heading"><div><h2>Layout</h2><p>Size, spacing and alignment</p></div></div>{common}<div className="inspector-section"><div className="section-title">DIMENSIONS</div><div className="two-fields"><label className="field-label">Width<select value={selected?.styles.width ?? "Auto"} onChange={e => updateSelected({ styles: { width: e.target.value } })}><option>Auto</option><option>100%</option><option>Fit content</option><option>320px</option></select></label><label className="field-label">Height<select value={selected?.styles.height ?? "Auto"} onChange={e => updateSelected({ styles: { height: e.target.value } })}><option>Auto</option><option>100%</option><option>320px</option><option>480px</option></select></label></div><label className="field-label">Padding<input type="range" min="0" max="80" step="4" value={selected?.styles.padding ?? 0} onChange={e => updateSelected({ styles: { padding: Number(e.target.value) } })}/></label><div className="align-controls"><button onClick={() => updateSelected({ styles: { align: "left" } })}><AlignLeft size={16}/></button><button onClick={() => updateSelected({ styles: { align: "center" } })}><AlignCenter size={16}/></button><button onClick={() => updateSelected({ styles: { align: "right" } })}><AlignJustify size={16}/></button></div></div></>;
     if (inspector === "Style") return <><div className="panel-heading"><div><h2>Style</h2><p>Typography, colors and effects</p></div></div>{common}<div className="inspector-section"><div className="section-title">TYPOGRAPHY</div><label className="field-label">Font size <span className="inline-value">{selected?.styles.fontSize ?? 16}px</span><input type="range" min="10" max="64" value={selected?.styles.fontSize ?? 16} onChange={e => updateSelected({ styles: { fontSize: Number(e.target.value) } })}/></label><div className="align-controls"><button onClick={() => updateSelected({ styles: { align: "left" } })}><AlignLeft size={16}/></button><button onClick={() => updateSelected({ styles: { align: "center" } })}><AlignCenter size={16}/></button><button onClick={() => updateSelected({ styles: { align: "right" } })}><AlignJustify size={16}/></button></div><label className="field-label">Text color<div className="color-field"><input type="color" value={selected?.styles.color ?? "#202033"} onChange={e => updateSelected({ styles: { color: e.target.value } })}/><code>{selected?.styles.color ?? "Default"}</code></div></label><label className="field-label">Background<div className="color-field"><input type="color" value={selected?.styles.background ?? "#ffffff"} onChange={e => updateSelected({ styles: { background: e.target.value } })}/><code>{selected?.styles.background ?? "Transparent"}</code></div></label></div></>;
-    if (inspector === "Responsive") return <><div className="panel-heading"><div><h2>Responsive</h2><p>Preview and adapt your layout</p></div></div>{common}<div className="inspector-section"><div className="section-title">BREAKPOINT OVERRIDES</div>{["Desktop · 1280px+", "Tablet · 768px", "Mobile · 375px"].map((t, i) => <button className="resource-row" key={t} onClick={() => { setViewport(i === 0 ? "desktop" : i === 1 ? "tablet" : "mobile"); setToast(`${t.split(" · ")[0]} preview selected`); }}><span className="resource-icon">{i === 0 ? <Monitor size={15}/> : i === 1 ? <Tablet size={15}/> : <Smartphone size={15}/>}</span><span>{t}<small>{i === 0 ? "Base styles" : "Inherits desktop styles"}</small></span><ChevronRight size={14}/></button>)}</div><p className="muted-note">Breakpoint-specific overrides are a foundation feature; independent responsive style persistence is not yet implemented.</p></>;
+    if (inspector === "Responsive") return <><div className="panel-heading"><div><h2>Responsive</h2><p>Set styles per viewport</p></div></div>{common}<div className="inspector-section"><div className="section-title">BREAKPOINTS</div>{["Desktop · 1280px+", "Tablet · 768px", "Mobile · 390px"].map((t, i) => <button className={`resource-row ${viewport === (i === 0 ? "desktop" : i === 1 ? "tablet" : "mobile") ? "active" : ""}`} key={t} onClick={() => { setViewport(i === 0 ? "desktop" : i === 1 ? "tablet" : "mobile"); setToast(`${t.split(" · ")[0]} styles selected`); }}><span className="resource-icon">{i === 0 ? <Monitor size={15}/> : i === 1 ? <Tablet size={15}/> : <Smartphone size={15}/>}</span><span>{t}<small>{i === 0 ? "Base styles" : selected?.responsive?.[i === 1 ? "tablet" : "mobile"] ? "Custom overrides" : "Inherits desktop styles"}</small></span><ChevronRight size={14}/></button>)}</div>{selected && <div className="inspector-section"><div className="section-title">{viewport === "desktop" ? "BASE STYLES" : `${viewport.toUpperCase()} OVERRIDES`}</div><label className="field-label">Font size <span className="inline-value">{(viewport === "desktop" ? selected.styles.fontSize : selected.responsive?.[viewport]?.fontSize) ?? selected.styles.fontSize ?? 16}px</span><input type="range" min="10" max="64" value={(viewport === "desktop" ? selected.styles.fontSize : selected.responsive?.[viewport]?.fontSize) ?? selected.styles.fontSize ?? 16} onChange={e => updateResponsive({ fontSize: Number(e.target.value) })}/></label><label className="field-label">Padding <span className="inline-value">{(viewport === "desktop" ? selected.styles.padding : selected.responsive?.[viewport]?.padding) ?? selected.styles.padding ?? 0}px</span><input type="range" min="0" max="100" step="4" value={(viewport === "desktop" ? selected.styles.padding : selected.responsive?.[viewport]?.padding) ?? selected.styles.padding ?? 0} onChange={e => updateResponsive({ padding: Number(e.target.value) })}/></label><label className="field-label">Alignment<select value={(viewport === "desktop" ? selected.styles.align : selected.responsive?.[viewport]?.align) ?? selected.styles.align ?? "center"} onChange={e => updateResponsive({ align: e.target.value })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label><button className="subtle-button" onClick={() => { if (viewport === "desktop") updateSelected({ styles: { fontSize: undefined, padding: undefined, align: undefined } }); else updateSelected({ responsive: { ...selected.responsive, [viewport]: undefined } }); }}>Reset {viewport} styles</button></div>}<p className="muted-note">Tablet and mobile overrides are saved with each element and included in exported HTML.</p></>;
     if (inspector === "Interactions") return <><div className="panel-heading"><div><h2>Interactions</h2><p>Define behaviour and events</p></div></div>{common}<div className="inspector-section"><div className="section-title">EVENT HANDLERS</div><div className="event-card"><div className="event-card-top"><Zap size={13}/><span>CLICK EVENT</span></div><strong>When {selected?.name ?? "element"} is clicked</strong><small>1 handler · Draft</small></div><button className="add-block-button" onClick={() => { setInspector("Backend"); setBackendTab("Blocks"); setBackendSize("expanded"); }}><Plus size={14}/> Edit event logic</button></div></>;
     if (inspector === "Accessibility") return <><div className="panel-heading"><div><h2>Accessibility</h2><p>Make your page work for everyone.</p></div></div>{common}<div className="inspector-section"><div className="section-title">SEMANTICS</div><label className="field-label">Semantic element<select value={selected?.semantic ?? (selected?.type === "heading" ? "h1" : selected?.type === "button" ? "button" : "default")} onChange={e => updateSelected({ semantic: e.target.value })}><option value="default">Default</option><option value="h1">Heading 1</option><option value="h2">Heading 2</option><option value="h3">Heading 3</option><option value="button">Button</option><option value="section">Section</option></select></label><label className="field-label">Accessible label<input placeholder="Describe this element" value={selected?.ariaLabel ?? ""} onChange={e => updateSelected({ ariaLabel: e.target.value })}/></label>{selected?.type === "image" && <><label className="field-label">Image URL<input type="url" placeholder="https://example.com/image.jpg" value={selected.src ?? ""} onChange={e => updateSelected({ src: e.target.value })}/></label><label className="field-label">Alternative text<input value={selected.text} onChange={e => updateSelected({ text: e.target.value })} placeholder="Describe the image"/></label></>}<div className="diagnostic-summary"><Check size={15}/><div><strong>Keyboard focus available</strong><small>Review labels before publishing</small></div></div></div></>;
     return <><div className="panel-heading"><div><h2>Advanced</h2><p>Identifiers and diagnostics</p></div></div>{common}<div className="inspector-section"><div className="section-title">ELEMENT ATTRIBUTES</div><label className="field-label">Element ID<input value={selected?.id ?? ""} readOnly/></label><label className="field-label">Component type<input value={selected?.type ?? ""} readOnly/></label><label className="field-label">Parent element<input value={nodes.find(n => n.id === selected?.parentId)?.name ?? "Page root"} readOnly/></label><button className="subtle-button" onClick={() => { navigator.clipboard?.writeText(JSON.stringify(selected, null, 2)); setToast("Element JSON copied"); }}><Copy size={13}/> Copy element JSON</button></div></>;
@@ -538,11 +790,11 @@ export default function App() {
 
   const canvasWidth = viewport === "desktop" ? "100%" : viewport === "tablet" ? "768px" : "390px";
   return <div className={`app-shell ${preview ? "preview-mode" : ""} ${backendSize !== "inspector" && inspector === "Backend" ? `backend-${backendSize}` : ""}`}>
-    <header className="topbar"><div className="brand-lockup"><div className="brand-mark"><Shapes size={19}/></div><span className="brand-name">sytely</span><span className="brand-divider"/><button className="project-switcher" title="Rename website" onClick={() => { const name = window.prompt("Website name", projectName); if (name?.trim()) setProjectName(name.trim().slice(0, 80)); }}>{projectName} <ChevronDown size={13}/></button></div><div className="topbar-centre"><span className={`save-indicator ${saveState}`}><span/>{savedLabel}</span></div><div className="topbar-actions"><button className="icon-button desktop-only" title="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!history.length}><Undo2 size={16}/></button><button className="icon-button desktop-only" title="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!future.length}><Redo2 size={16}/></button><span className="topbar-divider desktop-only"/><button className={`preview-button ${preview ? "is-active" : ""}`} onClick={() => { setPreview(!preview); setMobilePanel(null); }}><Eye size={15}/><span>{preview ? "Edit" : "Preview"}</span></button><button className="publish-button" onClick={() => window.dispatchEvent(new Event("sytely:publish"))}><Upload size={14}/><span>Publish</span></button><CloudAccount nodes={nodes} pageName={projectName} onToast={setToast} /><button className="avatar-button" title="Account menu" onClick={() => document.querySelector<HTMLButtonElement>(".cloud-account-button")?.click()}>S</button></div></header>
+    <header className="topbar"><div className="brand-lockup"><div className="brand-mark"><Shapes size={19}/></div><span className="brand-name">sytely</span><span className="brand-divider"/><button className="project-switcher" title="Rename website" onClick={() => { const name = window.prompt("Website name", projectName); if (name?.trim()) setProjectName(name.trim().slice(0, 80)); }}>{projectName} <ChevronDown size={13}/></button></div><div className="topbar-centre"><span className={`save-indicator ${saveState}`}><span/>{savedLabel}</span></div><div className="topbar-actions"><button className="icon-button desktop-only" title="Undo (Ctrl/Cmd+Z)" onClick={undo} disabled={!history.length}><Undo2 size={16}/></button><button className="icon-button desktop-only" title="Redo (Ctrl/Cmd+Shift+Z)" onClick={redo} disabled={!future.length}><Redo2 size={16}/></button><span className="topbar-divider desktop-only"/><button className={`preview-button ${preview ? "is-active" : ""}`} onClick={() => { setPreview(!preview); setMobilePanel(null); }}><Eye size={15}/><span>{preview ? "Edit" : "Preview"}</span></button><button className="export-button" onClick={exportSiteHtml} title="Download a standalone HTML site with all pages"><ExternalLink size={14}/><span>Export site</span></button><button className="publish-button" onClick={() => window.dispatchEvent(new Event("sytely:publish"))}><Upload size={14}/><span>Publish</span></button><CloudAccount nodes={nodes} pages={pages} activePageId={activePageId} pageName={projectName} onToast={setToast} /><button className="avatar-button" title="Account menu" onClick={() => document.querySelector<HTMLButtonElement>(".cloud-account-button")?.click()}>S</button></div></header>
     <main className={`editor-layout ${preview ? "preview-layout" : ""}`}>
       {!preview && <>{rail("left", leftCollapsed, setLeftCollapsed)}{!leftCollapsed && <><aside className={`workspace-panel ${mobilePanel === "left" ? "mobile-open" : ""}`} style={{ "--panel-width": `${leftWidth}px` } as React.CSSProperties}>{renderWorkspace()}</aside><div className="resize-handle left-resize" role="separator" aria-label="Resize left panel" aria-orientation="vertical" tabIndex={0} onMouseDown={e => changeWorkspaceSize("left", e)} onDoubleClick={() => resetWidth("left")} onKeyDown={e => { if (e.key === "ArrowLeft") setLeftWidth(w => Math.max(200, w - 12)); if (e.key === "ArrowRight") setLeftWidth(w => Math.min(480, w + 12)); }}/></>}</>}
       <section className={`canvas-workspace ${preview ? "canvas-preview" : ""}`}><div className="canvas-toolbar"><div className="canvas-page-control"><button className="page-dropdown" title="Rename page" onClick={() => { const name = window.prompt("Page name", pageName); if (name?.trim()) setPageName(name.trim().slice(0, 80)); }}><FileText size={14}/><span>{pageName}</span><ChevronDown size={12}/></button><span className="toolbar-slash">/</span><span className="toolbar-muted">Website</span></div><div className="canvas-tools"><div className="viewport-switcher"><button title="Desktop viewport" aria-label="Desktop viewport" className={viewport === "desktop" ? "active" : ""} onClick={() => setViewport("desktop")}><Monitor size={15}/></button><button title="Tablet viewport" aria-label="Tablet viewport" className={viewport === "tablet" ? "active" : ""} onClick={() => setViewport("tablet")}><Tablet size={15}/></button><button title="Mobile viewport" aria-label="Mobile viewport" className={viewport === "mobile" ? "active" : ""} onClick={() => setViewport("mobile")}><Smartphone size={15}/></button></div><span className="toolbar-divider"/><button className="zoom-control" onClick={() => setZoom(z => Math.max(50, z - 10))} title="Zoom out">−</button><button className="zoom-value" onClick={() => setZoom(100)}>{zoom}%</button><button className="zoom-control" onClick={() => setZoom(z => Math.min(150, z + 10))} title="Zoom in">+</button><span className="toolbar-divider"/><button className={`icon-button canvas-tool-button ${showGuides ? "tool-active" : ""}`} title="Toggle layout guides" onClick={() => setShowGuides(!showGuides)}><Grid2X2 size={15}/></button><button className="icon-button canvas-tool-button" title="Fit canvas to screen" onClick={() => { setZoom(100); setViewport("desktop"); }}><MaximizeIcon/></button></div></div>
-        <div className="canvas-scroll" ref={canvasRef} onClick={() => { if (!preview) setSelectedId(""); }}><div className="canvas-stage" style={{ width: canvasWidth, transform: `scale(${zoom / 100})`, transformOrigin: "top center" }}><div className={`website-page ${viewport}`} onClick={e => { if (e.target === e.currentTarget && !preview) setSelectedId(""); }}><div className="site-navbar"><div className="site-logo"><span className="site-logo-mark"><Shapes size={14}/></span> STUDIO</div><nav><button onClick={() => setPageName("Home")}>Home</button><button onClick={() => setToast("About page is not created yet")}>About</button><button onClick={() => setToast("Contact page is not created yet")}>Contact</button></nav><button className="site-nav-cta" onClick={() => setToast("Navigation action preview")}>Let's talk <ArrowRight size={13}/></button></div><div className="site-content" onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, null)}>{nodes.filter(n => n.parentId === null).map(renderElement)}{!nodes.length && <div className="canvas-empty"><Sparkles size={25}/><h2>Your canvas is ready</h2><p>Add an element to start building your page.</p><button className="primary-small" onClick={() => { setWorkspace("Add"); addNode("section"); }}>Add section</button></div>}</div><footer className="site-footer"><span>Made with <b>sytely</b></span><span>Designed with intention.</span></footer></div></div></div>
+        <div className="canvas-scroll" ref={canvasRef} onClick={() => { if (!preview) setSelectedId(""); }}><div className="canvas-stage" style={{ width: canvasWidth, transform: `scale(${zoom / 100})`, transformOrigin: "top center" }}><div className={`website-page ${viewport}`} onClick={e => { if (e.target === e.currentTarget && !preview) setSelectedId(""); }}><div className="site-navbar"><div className="site-logo"><span className="site-logo-mark"><Shapes size={14}/></span> STUDIO</div><nav>{pages.map(page => <button key={page.id} onClick={() => switchPage(page.id)}>{page.name}</button>)}</nav><button className="site-nav-cta" onClick={() => setToast("Navigation action preview")}>Let's talk <ArrowRight size={13}/></button></div><div className="site-content" onDragOver={e => e.preventDefault()} onDrop={e => onDrop(e, null)}>{nodes.filter(n => n.parentId === null).map(renderElement)}{!nodes.length && <div className="canvas-empty"><Sparkles size={25}/><h2>Your canvas is ready</h2><p>Add an element to start building your page.</p><button className="primary-small" onClick={() => { setWorkspace("Add"); addNode("section"); }}>Add section</button></div>}</div><footer className="site-footer"><span>Made with <b>sytely</b></span><span>Designed with intention.</span></footer></div></div></div>
         {!preview && <div className="canvas-statusbar"><div><span className="status-dot"/><span>{selected ? selected.name : "No selection"}</span><span className="status-separator">·</span><span>{viewport === "desktop" ? "Desktop" : viewport === "tablet" ? "Tablet" : "Mobile"} preview</span></div><div><span>{nodes.length} elements</span><span className="status-separator">·</span><span>Canvas ready</span></div></div>}
       </section>
       {!preview && <>{!rightCollapsed && <div className="resize-handle right-resize" role="separator" aria-label="Resize inspector panel" aria-orientation="vertical" tabIndex={0} onMouseDown={e => changeWorkspaceSize("right", e)} onDoubleClick={() => resetWidth("right")} onKeyDown={e => { if (e.key === "ArrowLeft") setRightWidth(w => Math.min(600, w + 12)); if (e.key === "ArrowRight") setRightWidth(w => Math.max(240, w - 12)); }}/ >}{!rightCollapsed && <aside className={`inspector-panel ${mobilePanel === "right" ? "mobile-open" : ""}`} style={{ "--panel-width": `${rightWidth}px` } as React.CSSProperties}>{renderInspector()}</aside>}{rail("right", rightCollapsed, setRightCollapsed)}</>}
