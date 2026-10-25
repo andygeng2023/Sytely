@@ -1,4 +1,4 @@
-project_id = "sytely"
+project_id = "syylksyuulzljivcvopo"
 
 [api]
 enabled = true
@@ -8,7 +8,7 @@ max_rows = 1000
 
 [auth]
 enabled = true
-site_url = "http://localhost:5173"
+site_url = "https://andygeng2023.github.io/Sytely/"
 additional_redirect_urls = [
   "https://andygeng2023.github.io/Sytely/",
   "http://localhost:5173"
