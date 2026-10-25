@@ -98,3 +98,36 @@
 .cloud-dashboard-note{margin:8px 0 14px;color:#9192a4;font-size:10px;line-height:1.5}
 .cloud-dashboard-modal .cloud-primary,.cloud-dashboard-modal .cloud-secondary{flex:none}
 @media(max-width:600px){.cloud-dashboard-modal{padding:22px 17px}.cloud-project-list{max-height:34dvh}.cloud-project-toolbar h3{font-size:13px}.cloud-new-project{font-size:10px;padding:7px 8px}.cloud-project-open{gap:7px}.cloud-current-label,.cloud-open-label{font-size:9px;padding:4px 5px}}
+
+
+/* Actionable, site-wide quality audit */
+.site-audit{display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;background:#fff}
+.site-audit>.panel-heading{flex:none}
+.site-audit>.panel-heading>svg{flex:none;color:#6c62d8}
+.audit-score-card{display:flex;align-items:center;gap:14px;margin:0 13px 12px;padding:14px;border:1px solid #e7e5fa;border-radius:11px;background:linear-gradient(135deg,#faf9ff,#f7fbff)}
+.audit-score-ring{display:flex;flex-direction:column;align-items:center;justify-content:center;width:64px;height:64px;flex:none;border:4px solid #d7d2ff;border-radius:50%;background:#fff;color:#5147c3}
+.audit-score-ring strong{font-size:22px;line-height:1;font-weight:750;letter-spacing:-1px}
+.audit-score-ring span{margin-top:3px;color:#9794b9;font-size:9px}
+.audit-score-card>div:last-child{min-width:0}
+.audit-score-card>div:last-child>strong{display:block;color:#39394f;font-size:12px}
+.audit-score-card p{margin:5px 0;color:#85869a;font-size:10px}
+.audit-score-card small{display:block;color:#a0a1b0;font-size:9px;line-height:1.45}
+.audit-summary-row{display:flex;justify-content:space-between;gap:5px;padding:0 14px 12px;border-bottom:1px solid #f0f0f5}
+.audit-summary-row span{display:flex;align-items:center;gap:4px;color:#86879a;font-size:9px;white-space:nowrap}
+.audit-summary-row span:first-child svg{color:#d95b62}.audit-summary-row span:nth-child(2) svg{color:#d79b3d}.audit-summary-row span:last-child svg{color:#7f83b4}
+.audit-issue-list{flex:1;min-height:0;overflow:auto;padding:7px 10px 12px}
+.audit-issue{display:flex;align-items:flex-start;gap:8px;padding:11px 4px;border-bottom:1px solid #f0f0f5}
+.audit-issue-icon{display:grid;place-items:center;width:25px;height:25px;flex:none;border-radius:7px;background:#f4f3ff;color:#7770c9}
+.audit-issue.error .audit-issue-icon{background:#fff0f0;color:#cc4f58}
+.audit-issue.warning .audit-issue-icon{background:#fff8e9;color:#ba8125}
+.audit-issue-copy{flex:1;min-width:0}
+.audit-issue-copy strong{display:block;color:#4b4b62;font-size:10px;line-height:1.45}
+.audit-issue-copy p{margin:4px 0;color:#85869a;font-size:10px;line-height:1.55}
+.audit-issue-copy small{color:#a0a1b0;font-size:9px}
+.audit-fix-button{display:grid;place-items:center;width:26px;height:26px;flex:none;border:1px solid #e8e6fb;border-radius:6px;background:#fff;color:#6258d9}
+.audit-fix-button:hover{background:#f1efff;border-color:#c9c4ff}
+.audit-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 12px;color:#2f9a70;text-align:center}
+.audit-empty strong{color:#4b4b62;font-size:12px}
+.audit-empty p{margin:0;color:#8b8ca0;font-size:10px;line-height:1.6}
+.audit-footer{display:flex;align-items:flex-start;gap:8px;flex:none;padding:12px;border-top:1px solid #ededf4;background:#fbfbfe;color:#9091a3;font-size:9px;line-height:1.55}
+.audit-footer svg{flex:none;color:#6f69c9}
