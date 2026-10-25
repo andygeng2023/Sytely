@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
-type Node = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; locked: boolean; href?: string; openInNewTab?: boolean; src?: string; ariaLabel?: string; semantic?: string; styles: Record<string, string | number | undefined>; responsive?: Record<string, Record<string, string | number | undefined> | undefined> };
+type Node = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; locked: boolean; href?: string; openInNewTab?: boolean; src?: string; ariaLabel?: string; semantic?: string; interaction?: { trigger: "click"; action: "navigatePage" | "scrollTo" | "toggleVisibility" | "setText"; targetId?: string; targetPageId?: string; value?: string }; styles: Record<string, string | number | undefined>; responsive?: Record<string, Record<string, string | number | undefined> | undefined> };
 type PageSnapshot = { id: string; name: string; nodes: Node[] };
 type Props = { nodes: Node[]; pages: PageSnapshot[]; activePageId: string; pageName: string; onToast: (message: string) => void };
 
