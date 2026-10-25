@@ -29,7 +29,9 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm install
-      - name: Build for GitHub Pages
+      - name: Run editor smoke tests
+        run: npm test
+      - name: Type-check and build for GitHub Pages
         run: npm run build
         env:
           VITE_BASE_PATH: /Sytely/
