@@ -3,8 +3,9 @@ import type { FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
-type Node = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; locked: boolean; styles: Record<string, string | number | undefined> };
-type Props = { nodes: Node[]; pageName: string; onToast: (message: string) => void };
+type Node = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; locked: boolean; href?: string; openInNewTab?: boolean; src?: string; ariaLabel?: string; semantic?: string; styles: Record<string, string | number | undefined>; responsive?: Record<string, Record<string, string | number | undefined> | undefined> };
+type PageSnapshot = { id: string; name: string; nodes: Node[] };
+type Props = { nodes: Node[]; pages: PageSnapshot[]; activePageId: string; pageName: string; onToast: (message: string) => void };
 
 async function sharePublishedSite(slug: string, onToast: (message: string) => void) {
   const url = new URL(window.location.href);
@@ -19,7 +20,7 @@ async function sharePublishedSite(slug: string, onToast: (message: string) => vo
   }
 }
 
-export function CloudAccount({ nodes, pageName, onToast }: Props) {
+export function CloudAccount({ nodes, pages, activePageId, pageName, onToast }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,13 +43,14 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
     if (!supabase || !session?.user || nodes.length === 0) return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
+      const projectPages = pages.map(page => page.id === activePageId ? { ...page, nodes } : page);
       setStatus("Saving to cloud…");
       try {
         let id = projectId;
         const slug = `site-${session.user.id.slice(0, 6)}-${Math.random().toString(36).slice(2, 7)}`;
         if (!id) {
           const { data, error } = await supabase!.from("sytely_projects").insert({
-            owner_id: session.user.id, name: pageName || "My website", slug, document: { version: 1, nodes }
+            owner_id: session.user.id, name: pageName || "My website", slug, document: { version: 2, nodes, pages: projectPages }
           }).select("id").single();
           if (error) throw error;
           id = data.id;
@@ -56,7 +58,7 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
           try { window.localStorage.setItem("sytely:cloud-project:v1", id); } catch { /* optional */ }
         } else {
           const { error } = await supabase!.from("sytely_projects").update({
-            name: pageName || "My website", document: { version: 1, nodes }
+            name: pageName || "My website", document: { version: 2, nodes, pages: projectPages }
           }).eq("id", id);
           if (error) throw error;
         }
@@ -67,11 +69,12 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
       }
     }, 900);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [nodes, pageName, session?.user?.id]);
+  }, [nodes, pages, activePageId, pageName, session?.user?.id]);
 
   useEffect(() => {
     const publish = async () => {
       if (!supabase || !session?.user) { setOpen(true); onToast("Sign in to publish your website"); return; }
+      const projectPages = pages.map(page => page.id === activePageId ? { ...page, nodes } : page);
       setBusy(true);
       try {
         let id = projectId;
@@ -79,7 +82,7 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
           const slug = `site-${session.user.id.slice(0, 6)}-${Math.random().toString(36).slice(2, 7)}`;
           const { data, error } = await supabase.from("sytely_projects").insert({
             owner_id: session.user.id, name: pageName || "My website", slug,
-            document: { version: 1, nodes }, published_document: { version: 1, nodes },
+            document: { version: 2, nodes, pages: projectPages }, published_document: { version: 2, nodes, pages: projectPages },
             is_published: true, published_at: new Date().toISOString()
           }).select("id,slug").single();
           if (error) throw error;
@@ -90,8 +93,8 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
           const { data: row, error: readError } = await supabase.from("sytely_projects").select("slug").eq("id", id).single();
           if (readError) throw readError;
           const { error } = await supabase.from("sytely_projects").update({
-            name: pageName || "My website", document: { version: 1, nodes },
-            published_document: { version: 1, nodes }, is_published: true, published_at: new Date().toISOString()
+            name: pageName || "My website", document: { version: 2, nodes, pages: projectPages },
+            published_document: { version: 2, nodes, pages: projectPages }, is_published: true, published_at: new Date().toISOString()
           }).eq("id", id);
           if (error) throw error;
           await sharePublishedSite(row.slug, onToast);
@@ -104,7 +107,7 @@ export function CloudAccount({ nodes, pageName, onToast }: Props) {
     };
     window.addEventListener("sytely:publish", publish);
     return () => window.removeEventListener("sytely:publish", publish);
-  }, [session, projectId, nodes, pageName, onToast]);
+  }, [session, projectId, nodes, pages, activePageId, pageName, onToast]);
 
   async function submitAuth(event: FormEvent) {
     event.preventDefault();
