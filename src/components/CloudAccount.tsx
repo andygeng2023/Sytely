@@ -4,9 +4,9 @@ import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
 type Node = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; locked: boolean; styles: Record<string, string | number | undefined> };
-type Props = { nodes: Node[]; pageName: string; onLoad: (nodes: Node[]) => void; onToast: (message: string) => void };
+type Props = { nodes: Node[]; pageName: string; onToast: (message: string) => void };
 
-export function CloudAccount({ nodes, pageName, onLoad, onToast }: Props) {
+export function CloudAccount({ nodes, pageName, onToast }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
