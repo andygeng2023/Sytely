@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { supabase } from "../lib/supabase";
 
-type SiteNode = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; href?: string; openInNewTab?: boolean; src?: string; styles?: Record<string, string | number | undefined> };
+type SiteNode = { id: string; type: string; name: string; text: string; parentId: string | null; visible: boolean; href?: string; openInNewTab?: boolean; src?: string; ariaLabel?: string; semantic?: string; styles?: Record<string, string | number | undefined> };
 type Site = { name: string; slug: string; document: { nodes?: SiteNode[] }; published_at: string | null };
 
 export default function PublishedSite({ slug }: { slug: string }) {
@@ -33,15 +33,16 @@ export default function PublishedSite({ slug }: { slug: string }) {
       padding: typeof styles.padding === "number" ? styles.padding : undefined,
       borderRadius: typeof styles.radius === "number" ? styles.radius : undefined,
       textAlign: styles.align === "left" || styles.align === "right" ? styles.align : "center",
-      width: typeof styles.width === "string" && styles.width !== "Auto" ? styles.width : undefined,
+      width: typeof styles.width === "string" && styles.width !== "Auto" ? styles.width === "Fit content" ? "fit-content" : styles.width : undefined,
+      height: typeof styles.height === "string" && styles.height !== "Auto" ? styles.height : undefined,
       boxSizing: "border-box",
       maxWidth: "100%",
     };
     const nested = children(node.id).map(child => <div key={child.id}>{renderNode(child)}</div>);
-    if (node.type === "heading") return <h1 key={node.id} style={style}>{node.text}</h1>;
-    if (node.type === "paragraph") return <p key={node.id} style={style}>{node.text}</p>;
-    if (node.type === "button") return <a key={node.id} className="published-button" href={node.href || "#"} target={node.openInNewTab ? "_blank" : undefined} rel={node.openInNewTab ? "noreferrer" : undefined} onClick={event => { if (!node.href) event.preventDefault(); }} style={style}>{node.text}</a>;
-    if (node.type === "image") return node.src ? <img key={node.id} className="published-image" style={{ ...style, display: "block", objectFit: "cover" }} src={node.src} alt={node.text} /> : <div key={node.id} className="published-image" style={style} role="img" aria-label={node.text}>{node.text || "Image placeholder"}</div>;
+    if (node.type === "heading") { const HeadingTag = node.semantic === "h2" ? "h2" : node.semantic === "h3" ? "h3" : "h1"; return <HeadingTag key={node.id} style={style} aria-label={node.ariaLabel || undefined}>{node.text}</HeadingTag>; }
+    if (node.type === "paragraph") return <p key={node.id} style={style} aria-label={node.ariaLabel || undefined}>{node.text}</p>;
+    if (node.type === "button") return <a key={node.id} className="published-button" href={node.href || "#"} aria-label={node.ariaLabel || undefined} target={node.openInNewTab ? "_blank" : undefined} rel={node.openInNewTab ? "noreferrer" : undefined} onClick={event => { if (!node.href) event.preventDefault(); }} style={style}>{node.text}</a>;
+    if (node.type === "image") return node.src ? <img key={node.id} className="published-image" style={{ ...style, display: "block", objectFit: "cover" }} src={node.src} alt={node.text} /> : <div key={node.id} className="published-image" style={style} role="img" aria-label={node.ariaLabel || node.text}>{node.text || "Image placeholder"}</div>;
     return <section key={node.id} className={node.type === "feature" ? "published-feature" : "published-section"} style={style}>{node.type === "feature" && <strong>{node.text}</strong>}{node.type !== "feature" && node.text && <p>{node.text}</p>}{nested}</section>;
   };
   return <main className="published-site"><header className="published-header"><a href="./" className="published-brand">{site.name}</a></header><article className="published-content">{children(null).map(node => <div key={node.id}>{renderNode(node)}</div>)}</article><footer className="published-footer">Published with Sytely</footer></main>;
