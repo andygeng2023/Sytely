@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../lib/supabase";
 
@@ -92,7 +93,7 @@ export function CloudAccount({ nodes, pageName, onLoad, onToast }: Props) {
     return () => window.removeEventListener("sytely:publish", publish);
   }, [session, projectId, nodes, pageName, onToast]);
 
-  async function submitAuth(event: React.FormEvent) {
+  async function submitAuth(event: FormEvent) {
     event.preventDefault();
     if (!supabase) return;
     setBusy(true);
