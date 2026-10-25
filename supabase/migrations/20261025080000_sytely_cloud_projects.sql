@@ -39,7 +39,7 @@ create or replace function public.get_sytely_published_site(site_slug text)
 returns jsonb
 language sql
 stable
-security invoker
+security definer
 set search_path = ''
 as $$
   select jsonb_build_object(
