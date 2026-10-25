@@ -1,39 +1,71 @@
 # Sytely Studio
 
-A React + TypeScript foundation for a visual website editor. The current implementation focuses on the editor shell, shared document state, direct canvas editing, contextual panels, and a first backend-workspace prototype.
+Sytely Studio is a React + TypeScript visual website-editor prototype. It provides an editor shell, a sample website canvas, contextual workspace/inspector panels, and browser-local draft persistence.
 
-## Getting started
+## Open the editor on your computer
 
-Requirements: Node.js 20 or newer.
+1. Install Node.js 20 or newer from https://nodejs.org/.
+2. Download or clone this repository, then open a terminal in the project folder.
+3. Run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Build and type-check:
+4. Open the local URL Vite prints, usually http://localhost:5173.
+
+To verify the production bundle locally:
 
 ```bash
-npm run typecheck
+npm test
+npm run build
+npm run preview
+```
+
+The preview command is for checking the production build locally, not for serving production traffic.
+
+## Deploy on GitHub Pages
+
+The repository includes a GitHub Actions deployment workflow. After merging the changes into `main`:
+
+1. Open the repository's **Settings → Pages**.
+2. Set **Build and deployment → Source** to **GitHub Actions**.
+3. Open **Actions** and watch the **Deploy Sytely to GitHub Pages** workflow.
+4. When it succeeds, open **Settings → Pages** to see the published URL. For this repository it will normally be `https://andygeng2023.github.io/Sytely/`.
+
+The workflow installs dependencies, runs smoke tests, builds the Vite app with the `/Sytely/` base path, and publishes the `dist` folder. Future pushes to `main` trigger redeployment.
+
+## Deploy on InfinityFree or another static host
+
+Sytely's frontend can be hosted as static files. Build it for a root-domain or subdomain deployment:
+
+```bash
+npm install
+npm test
 npm run build
 ```
 
-## Implemented foundation
+Then upload the **contents of the generated `dist/` folder** (not the source folder) into the hosting account's web root, usually `htdocs` or `public_html`. Make sure `index.html` is directly in that web root. For a site hosted under a subdirectory, set `VITE_BASE_PATH` to that directory before building (for example, `VITE_BASE_PATH=/demo/`).
 
-- Four-area editor: left tool rail, contextual workspace, central canvas, contextual inspector, plus top and bottom toolbars.
-- Resizable side panels with pointer drag, double-click reset, keyboard resizing, collapse/expand, and mobile drawer behaviour.
-- Searchable Add catalogue with Layout, Basic, Media, Interactive, Forms, and Data categories.
-- Shared document-node state used by the canvas and Layers panel.
-- Element selection, inline text editing, property/style changes, add, duplicate, delete, visibility, locking, and sibling reordering shortcuts.
-- Undo/redo history, local draft save indicator, desktop/tablet/mobile canvas presets, zoom, preview mode, and layout guides.
-- Inspector modes for Properties, Layout, Style, Responsive, Interactions, Backend, Accessibility, and Advanced.
-- Backend workspace prototype with Blocks, Code, Data, Events, and Console tabs.
-- Responsive editor layout, keyboard focus styles, and reduced-motion support.
+You need Node.js on your own computer to build the React app; the host only serves the generated HTML, CSS and JavaScript. The current editor does not require a server-side PHP process.
 
-## Current limitations
+## Current limitations — read before production use
 
-This is an editor foundation, not a production website builder yet. Persistence currently lives in memory; the save action marks the local draft as saved but does not write to a server or browser database. Publish is a placeholder. The block editor illustrates an event/action sequence but does not execute arbitrary code. Code editing is a local draft textarea rather than a syntax-highlighted IDE. Database connectors, authentication, collaboration, templates, asset uploads, and independently persisted responsive overrides are not connected.
+This release is **not a production-ready multi-user website builder**. The editor draft is saved to the current browser's `localStorage`; it is not uploaded to a server, synced across devices, backed up remotely, or associated with a user account. Clearing browser storage can remove a draft. Export or back up important work before relying on it.
+
+The Publish control is not connected to a real publishing service. The backend Blocks tab is a visual prototype, not an execution engine. Data connectors, secure authentication, access controls, collaboration, asset uploads, database operations, and full accessibility/security testing are not implemented. Do not store secrets, credentials, or sensitive personal data in editor drafts.
+
+## Features in this foundation
+
+- Four-area workspace with resizable/collapsible panels and keyboard-resize controls.
+- Element catalogue, shared canvas/layer node state, selection and inline text editing.
+- Element insertion, duplication, deletion, visibility/locking, drag-and-drop and circular-move prevention.
+- Undo/redo, responsive viewport presets, zoom, preview mode and keyboard shortcuts.
+- Contextual inspector modes and a backend-workspace prototype.
+- Browser-local draft persistence and workspace panel preferences.
+- Vite production build, GitHub Pages workflow and editor smoke tests.
 
 ## Architecture direction
 
-Keep the document model independent from React rendering. As the project grows, move node types/schema, validated commands, undo history, serialization, and persistence into separate modules. Keep generated block logic separate from custom code modules, and introduce schema validation and automated tests before adding production data operations.
+Keep the serialized document independent from the React component tree. Before launching a multi-user product, add a versioned schema and migration strategy, robust document commands and history, remote persistence with authentication and authorization, asset storage, executable logic sandboxing, end-to-end browser tests, and an independent security/accessibility review.
