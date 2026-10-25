@@ -13,10 +13,27 @@ type AuditNode = {
   semantic?: string;
   src?: string;
   interaction?: { action: string };
+  styles?: { color?: string; background?: string; fontSize?: number };
 };
 type AuditPage = { id: string; name: string; nodes: AuditNode[] };
 type Issue = { id: string; severity: "error" | "warning" | "info"; title: string; detail: string; pageId: string; pageName: string; nodeId?: string; nodeName?: string };
 type Props = { pages: AuditPage[]; onSelect: (pageId: string, nodeId: string) => void };
+
+function luminance(color?: string): number | null {
+  if (!color || !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(color)) return null;
+  const raw = color.slice(1);
+  const hex = raw.length === 3 ? raw.split("").map(char => char + char).join("") : raw;
+  const channels = [0, 2, 4].map(index => parseInt(hex.slice(index, index + 2), 16) / 255)
+    .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function contrastRatio(foreground?: string, background?: string): number | null {
+  const fg = luminance(foreground);
+  const bg = luminance(background);
+  if (fg === null || bg === null) return null;
+  return (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+}
 
 function inspectSite(pages: AuditPage[]): Issue[] {
   const issues: Issue[] = [];
@@ -32,6 +49,13 @@ function inspectSite(pages: AuditPage[]): Issue[] {
       }
     }
     for (const node of visible) {
+      if (["heading", "paragraph", "button", "feature"].includes(node.type)) {
+        const ratio = contrastRatio(node.styles?.color, node.styles?.background);
+        const threshold = node.type === "heading" && (node.styles?.fontSize ?? 16) >= 24 ? 3 : 4.5;
+        if (ratio !== null && ratio < threshold) {
+          issues.push({ id: `${page.id}:${node.id}:contrast`, severity: "warning", title: "Text contrast may be too low", detail: `The explicit text/background colors have a contrast ratio of ${ratio.toFixed(2)}:1. Aim for at least ${threshold}:1 for this text size.`, pageId: page.id, pageName: page.name, nodeId: node.id, nodeName: node.name });
+        }
+      }
       if (node.type === "image" && !node.text.trim()) {
         issues.push({ id: `${page.id}:${node.id}:alt`, severity: "error", title: "Image needs alternative text", detail: "Describe the meaningful information in this image, or use empty alt text only if it is purely decorative.", pageId: page.id, pageName: page.name, nodeId: node.id, nodeName: node.name });
       }
